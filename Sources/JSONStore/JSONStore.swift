@@ -1,8 +1,10 @@
 public class JsonEntity {
     private var jsonText: String
-    private var arrayValues:[(value: String, type: String)]? = nil
-    private var objectEntries:[(key: String, value: String, type: String)]? = nil
+    private var arrayValues:[(value: String, type: String)] = []
+    private var objectEntries:[(key: String, value: String, type: String)] = []
     private var contentType:String
+    private var copyArrayData:Bool = false
+    private var copyObjectEntries:Bool = false
     
     public enum JSONType: String {
         case string = "string"
@@ -19,7 +21,11 @@ public class JsonEntity {
         
     public init(_ json:String) {
         jsonText = json
-        contentType = json.first == "{" ? "object" : "array"
+        switch (jsonText.first) {
+            case "{": contentType = "object"
+            case "[": contentType = "array"
+            default: contentType = "string"
+        }
     }
     
     private init(_ json: String, _ type: String) {
@@ -27,49 +33,47 @@ public class JsonEntity {
         contentType = type
     }
     
-    private func getField <T>(_ path: String?, _ fieldName: String, _ mapper: (String) -> T?) -> T? {
+    private func getField <T>(_ path: String?, _ fieldName: String, _ mapper: (String) -> T?, ignoreType:Bool = false) -> T? {
         guard let (data, type) = path == nil ? (jsonText, contentType) : decodeData(path!) else { return nil; }
-        if type != fieldName { return nil }
+        if !ignoreType && type != fieldName { return nil }
         return mapper(data)
     }
     
-    public func text(_ path:String? = nil) -> String? {
+    public func string(_ path:String? = nil) -> String? {
         return path == nil ? jsonText : decodeData(path!)?.value
     }
     
-    public func number(_ path:String? = nil) -> Float? {
-        return getField(path, "number", { Float($0) })
+    public func number(_ path:String? = nil, ignoreType: Bool = false) -> Double? {
+        return getField(path, "number", { Double($0) }, ignoreType: ignoreType)
     }
     
     public func isNull(_ path:String? = nil) -> Bool? {
-        guard let (value, type) = path == nil ? (jsonText, contentType) : decodeData(path!) else {
+        guard let type = path == nil ? contentType: decodeData(path!)?.type else {
             return nil
         }
-        return type == "null" && value == "null"
+        return type == "null"
     }
     
     public func object(_ path:String? = nil) -> JsonEntity? {
         if path == nil { return self }
-        guard let value = decodeData(path!) else { return nil }
-        if value.type != "object" { return nil }
-        return JsonEntity(value.value)
+        return getField(path, "object", { JsonEntity($0, "object")})
     }
     
-    public func bool(_ path:String? = nil) -> Bool? {
-        return getField(path, "boolean", { $0 == "true" })
+    public func bool(_ path: String? = nil, ignoreType: Bool = false) -> Bool? {
+        return getField(path, "boolean", { $0 == "true" }, ignoreType: ignoreType)
     }
     
-    public func array(_ path:String? = nil) -> [(JsonEntity, JSONType)]? {
-        arrayValues = []
+    public func array(_ path:String? = nil) -> [JsonEntity]? {
+        copyArrayData = true
         let data = decodeData(path == nil ? "-1" : "\(path!).-1")
         if data?.value != "$COMPLETE_ARRAY" || data?.type != "code" {
-            arrayValues = nil
+            copyArrayData = false
             return nil
         }
-        let results = arrayValues!.map({value in
-            return (JsonEntity(value.value), JSONType(value.type))
-        }) as [(JsonEntity, JSONType)]
-        arrayValues = nil
+        let results = arrayValues.map({value in
+            return JsonEntity(value.value, value.type)
+        }) as [JsonEntity]
+        copyArrayData = false
         return results
     }
     
@@ -77,23 +81,23 @@ public class JsonEntity {
         return decodeData(path) != nil
     }
     
-    public func entries(_ path:String) -> [(key: String, value: JsonEntity, type: JSONType)]? {
-        objectEntries = []
+    public func entries(_ path:String) -> [(key: String, value: JsonEntity)]? {
+        copyObjectEntries = true
         let data = decodeData("\(path).dummyAtr")
         if data?.value != "$COMPLETE_OBJECT" || data?.type != "code" {
-            objectEntries = nil
+            copyObjectEntries = false
             return nil
         }
-        let results = objectEntries!.map({ value in
-            return (value.key, JsonEntity(value.value),  JSONType(value.type))
-        }) as [(String, JsonEntity, JSONType)]
-        objectEntries = nil
+        let results = objectEntries.map({ value in
+            return (value.key, JsonEntity(value.value, value.type))
+        }) as [(String, JsonEntity)]
+        copyObjectEntries = false
         return results
     }
-        
+
     private func resolveValue(value: String, type: String, ensurePrimitive: Bool = false) -> Any? {
         switch(type) {
-            case "number": return Float(value)!
+            case "number": return Double(value)!
             case "object": return ensurePrimitive ? value : JsonEntity(value)
             case "array": return ensurePrimitive ? value : JsonEntity(value).array()!
             case "boolean": return value == "true" ? true : false
@@ -102,9 +106,13 @@ public class JsonEntity {
         }
     }
     
-    public func value(_ path: String, serializable: Bool = false) -> (value: Any?, type: JSONType)? {
-        guard let value = decodeData(path) else { return nil }
-        return (resolveValue(value: value.value, type: value.type, ensurePrimitive: serializable), JSONType(value.type))
+    public func value(_ path: String? = nil, serializable: Bool = false) -> (value: Any?, type: JSONType)? {
+        guard let (value, type) = (path == nil ? (jsonText, contentType) : decodeData(path!)) else { return nil }
+        return (resolveValue(value: value, type: type, ensurePrimitive: serializable), JSONType(type))
+    }
+    
+    public func type() -> JSONType {
+        return JSONType(contentType)
     }
             
     private func decodeData(_ inputPath:String) -> (value: String, type: String)? {
@@ -125,9 +133,10 @@ public class JsonEntity {
         var pathArrayIndex = -1 // the array index of given on path
         var notationBalance = 0
         var grabbingDataType: String = "string"
+        var possibleType: String = ""
         
-        let copyArrayData:Bool = arrayValues != nil
-        let copyObjectEntries:Bool = objectEntries != nil
+        arrayValues = []
+        objectEntries = []
         
         for char in jsonText {
             // if within quotation ignore processing json literals...
@@ -138,7 +147,12 @@ public class JsonEntity {
                     if isCountArray {
                         // ignore processing if element in not matching the array index
                         if elementIndexCursor != pathArrayIndex {
-                            if isGrabbingMultipleValues { grabbedText.append(char) }
+                            if isGrabbingMultipleValues {
+                                if notationBalance == processedPathIndex + 2 {
+                                    grabbingDataType = char == "{" ? "object" : "array"
+                                }
+                                grabbedText.append(char)
+                            }
                             continue
                         }
                         processedPathIndex += 1
@@ -186,7 +200,7 @@ public class JsonEntity {
                     if isGrabbingText {
                         // when finished copy last primitive value on copyObjectEntries mode. Need to make sure the parent container notation is an object
                         if copyObjectEntries && char == "}" {
-                            objectEntries!.append((grabbingKey, grabbedText, grabbingDataType))
+                            objectEntries.append((grabbingKey, grabbedText, grabbingDataType))
                             return ("$COMPLETE_OBJECT", "code")
                         }
                         return (grabbedText, grabbingDataType)
@@ -198,7 +212,7 @@ public class JsonEntity {
                         if isCountArray {
                             // occur when when not matching element is found for given array index and array finished iterating...
                             if isGrabbingMultipleValues {
-                                arrayValues!.append((grabbedText, grabbingDataType))
+                                arrayValues.append((grabbedText, grabbingDataType))
                                 return ("$COMPLETE_ARRAY", "code")
                             }
                             return nil
@@ -212,7 +226,7 @@ public class JsonEntity {
                         // occur after finishing copy json notation
                         if processedPathIndex == paths.count {
                             if !copyObjectEntries { return (grabbedText, grabbingDataType) }
-                            objectEntries!.append((grabbingKey, grabbedText , grabbingDataType))
+                            objectEntries.append((grabbingKey, grabbedText , grabbingDataType))
                             startSearchValue = false
                             isGrabbingNotation = false
                             processedPathIndex -= 1
@@ -231,35 +245,29 @@ public class JsonEntity {
             if isGrabbingMultipleValues {
                 // after each element in array level there would be ',' character
                 if char == "," && (processedPathIndex + 1) == notationBalance {
-                    arrayValues!.append((grabbedText, grabbingDataType))
+                    arrayValues.append((grabbedText, grabbingDataType))
                     grabbedText = ""
+                    continue
                 } else {
                     grabbedText.append(char)
                 }
-                continue
             }
             
             if startSearchValue {
                 if notationBalance == processedPathIndex || (isCountArray && (processedPathIndex + 1) == notationBalance) {
-                    // if counting inside an array and check if arrived to correct item index
-                    if  isCountArray && elementIndexCursor != pathArrayIndex {
-                        if char == "," {
-                            // if not matched then , character move to next element index
-                            elementIndexCursor += 1
-                        }
-                        
-                        if char == "\"" {
-                            isInQuotes = !isInQuotes
-                        }
-                        continue
-                    }
                     
                     if char == "\"" {
                         isInQuotes = !isInQuotes
+                        if isCountArray && elementIndexCursor != pathArrayIndex {
+                            if isInQuotes {
+                                grabbingDataType = "string"
+                            }
+                            continue
+                        }
                         isGrabbingText = !isGrabbingText
                         if !isGrabbingText {
                             if !copyObjectEntries { return (grabbedText, "string") }
-                            objectEntries!.append((grabbingKey, grabbedText, "string"))
+                            objectEntries.append((grabbingKey, grabbedText, "string"))
                             startSearchValue = false
                             processedPathIndex -= 1
                         } else {
@@ -268,28 +276,36 @@ public class JsonEntity {
                         }
                         // used to copy values true, false, null and number
                     } else {
-                        var possibleType: String? = nil
+                        possibleType = ""
                         
                         if char.isNumber { possibleType = "number" }
                         else if char == "t" || char == "f" { possibleType = "boolean" }
                         else if char == "n" { possibleType = "null" }
                         
-                        if !isInQuotes && !isGrabbingText && possibleType != nil {
-                            grabbingDataType = possibleType!
+                        if !isInQuotes && !isGrabbingText && possibleType != "" {
+                            grabbingDataType = possibleType
+                            if isCountArray && elementIndexCursor != pathArrayIndex { continue }
                             grabbedText = ""
                             grabbedText.append(char)
                             isGrabbingText = true
                             continue
-                        } else if isGrabbingText {
-                            if !isInQuotes && char == "," {
-                                if !copyObjectEntries { return (grabbedText, grabbingDataType) }
-                                objectEntries!.append((grabbingKey, grabbedText, grabbingDataType))
-                                startSearchValue = false
-                                isGrabbingText = false
-                                processedPathIndex -= 1
+                        } else if !isInQuotes && char == "," {
+                            if isCountArray {
+                                elementIndexCursor += 1
+                                continue
                             }
+                            if isGrabbingText {
+                                if copyObjectEntries {
+                                    objectEntries.append((grabbingKey, grabbedText, grabbingDataType))
+                                    startSearchValue = false
+                                    isGrabbingText = false
+                                    processedPathIndex -= 1
+                                } else  {
+                                    return (grabbedText, grabbingDataType)
+                                }
+                            }
+                        } else if isGrabbingText {
                             grabbedText.append(char)
-                            continue
                         }
                     }
                 }
