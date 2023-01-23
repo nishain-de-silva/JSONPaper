@@ -34,9 +34,10 @@ and then use methods. You can use the following methods to access value of given
 - `isExist()`
 - `entries()`
 - `type()`
+- `dump()`
 
 
-If the key / index does not exist in given path or if the value is another data type from expected formated (except for `string()` see [Exceptions](#exceptional-situations)) then `nill` would be given. You don't need to worry about optional chaining you will recieve `nil` if intermediate path also did not exist.
+If the key / index does not exist in given path or if the value is another data type from expected formated then `nill` would be given. You don't need to worry about optional chaining you will recieve `nil` if intermediate path also did not exist.
 
 example:
 ```swift
@@ -112,7 +113,7 @@ for `number` and `boolean` you can parse from `string` by using `ignoreType` par
 
 So how do you get value of unknown types ? You can use `value()` method. It gives the natural value of an attribute as a `tuple` containing (key: `Any?`, type: `JSONType`).
 
-If you want to recieve values in `primitive` types you can use `serializable` parameter (by default `false`). This make `array` and `object` type to be recieved as `string` format. Hence you only recieve types within (`nil`, `Double`, `String` and `Bool`) only.
+If you want to recieve values in `seriaziable` format you can use `serializable` parameter (by default `false`). This make `JsonEntity` all instances will be converted to `string`.
 
 ```swift
 let (value, type) = jsonRef.value("somePath")
@@ -145,7 +146,15 @@ you could additionally use `type()` to get data type of current json `reference`
     ```
     In JSON data if keyB happens to be an `string` or another primitive type instead of container type of either `object` or `array` then last found intermediete primitive value (in this case string value of keyB) will be return instead of `nil`.
 
-- if you are not sure of sure of data type particular of an attribute or `dumping` pourpose you can always use `.string(attributePath)` as it always give the value as a `string` format unless attribute was not found which would give `nil`.
+- if you are not sure of sure of data type particular of an attribute or `dumping` pourpose you can always use `.dump(attributePath)` as it always give the value as a `string` format unless attribute was not found which would give `nil`.
 
-### Author and Main Contributor
+## Future Ideas
+
+- Immune the program for usage of escape characters on `JSON`
+- C implementation for reading `JSON` string
+- parse `json string` data inside parent `JSON` !
+
+## Author and Main Contributor
 @Nishain De Silva
+
+`Thoughts` -   _`"`I recently found out it is difficult parse `JSON` on type constrained lanauage unlike in `JavaScript` so I ended up creating my own library for this pourpose! So I thought maybe others face the same problem and why not make other also have a `taste` of what I created`"`_

@@ -99,7 +99,12 @@ public class JsonEntity {
         switch(type) {
             case "number": return Double(value)!
             case "object": return ensurePrimitive ? value : JsonEntity(value)
-            case "array": return ensurePrimitive ? value : JsonEntity(value).array()!
+        case "array": return ensurePrimitive ? JsonEntity(value).array()!
+                .map({ item in
+                    if item.contentType == "array" || item.contentType == "object"
+                    { return item.jsonText }
+                    return resolveValue(value: item.jsonText, type: item.contentType)!
+                })  as [Any] : JsonEntity(value).array()!
             case "boolean": return value == "true" ? true : false
             case "null": return nil
             default: return value
@@ -113,6 +118,10 @@ public class JsonEntity {
     
     public func type() -> JSONType {
         return JSONType(contentType)
+    }
+    
+    public func dump(_ path: String? = nil) -> String? {
+        return path == nil ? jsonText : decodeData(path!)?.value
     }
             
     private func decodeData(_ inputPath:String) -> (value: String, type: String)? {
