@@ -113,8 +113,6 @@ for `number` and `boolean` you can parse from `string` by using `ignoreType` par
 
 So how do you get value of unknown types ? You can use `value()` method. It gives the natural value of an attribute as a `tuple` containing (key: `Any?`, type: `JSONType`).
 
-If you want to recieve values in `seriaziable` format you can use `serializable` parameter (by default `false`). This make `JsonEntity` all instances will be converted to `string`.
-
 ```swift
 let (value, type) = jsonRef.value("somePath")
 
@@ -131,12 +129,31 @@ type  | output
 .string | string
 .number | double
 .boolean | `true` or `false`
-.object | JsonEntity
-.array | [JsonEntity]
+.object | JSONEntity
+.array | [JSONEntity]
 .null | `nil`
 
 you could additionally use `type()` to get data type of current json `reference`
 
+## Serializing Data
+
+Sometimes you may need to write the results on `serializable` destination such as in-device cache or `POJO`. You can use `serialize` method. There are two mechanism you can serialize data :
+
+Serialization  | Behaviour
+--- | ---
+`.simple` | `array` and `object` types will be converted to string
+`.nested` | `array` and `object` will have their inner elements converted to their `natural` values recursively. `object` will be represented by `dictionary`
+
+## Capturing references
+
+`capture()` is used to capture for later reference. You can basically query values in 2 ways:
+
+```swift
+let value = reference.string(attributePath)!
+// or
+let value = reference.capture(attributePath)?.string()
+// both gives same result
+```
 
 ## Exceptional Situations
 
@@ -146,7 +163,7 @@ you could additionally use `type()` to get data type of current json `reference`
     ```
     In JSON data if keyB happens to be an `string` or another primitive type instead of container type of either `object` or `array` then last found intermediete primitive value (in this case string value of keyB) will be return instead of `nil`.
 
-- if you are not sure of sure of data type particular of an attribute or `dumping` pourpose you can always use `.dump(attributePath)` as it always give the value as a `string` format unless attribute was not found which would give `nil`.
+- To dump data at a particular node for `debugging` pourpose you can always use `.dump(attributePath)` as it always give the value in `string` format unless attribute was not found which would give `nil`.
 
 ## Future Ideas
 
@@ -157,4 +174,4 @@ you could additionally use `type()` to get data type of current json `reference`
 ## Author and Main Contributor
 @Nishain De Silva
 
-`Thoughts` -   _`"`I recently found out it is difficult parse `JSON` on type constrained lanauage unlike in `JavaScript` so I ended up creating my own library for this pourpose! So I thought maybe others face the same problem and why not make other also have a `taste` of what I created`"`_
+`Thoughts` -   _**"** I recently found out it is difficult parse `JSON` on type constrained lanauage unlike in `JavaScript` so I ended up creating my own library for this pourpose! So I thought maybe others face the same problem and why not make other also have a `taste` of what I created **"**_

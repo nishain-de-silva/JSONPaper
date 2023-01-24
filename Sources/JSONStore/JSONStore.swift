@@ -1,4 +1,4 @@
-public class JsonEntity {
+public class JSONEntity {
     private var jsonText: String
     private var arrayValues:[(value: String, type: String)] = []
     private var objectEntries:[(key: String, value: String, type: String)] = []
@@ -17,6 +17,11 @@ public class JsonEntity {
         init(_ v: String) {
             self = .init(rawValue: v)!
         }
+    }
+    
+    public enum SerializationType {
+        case simple
+        case nested
     }
         
     public init(_ json:String) {
@@ -40,7 +45,7 @@ public class JsonEntity {
     }
     
     public func string(_ path:String? = nil) -> String? {
-        return path == nil ? jsonText : decodeData(path!)?.value
+        return getField(path, "string", { $0 })
     }
     
     public func number(_ path:String? = nil, ignoreType: Bool = false) -> Double? {
@@ -54,16 +59,16 @@ public class JsonEntity {
         return type == "null"
     }
     
-    public func object(_ path:String? = nil) -> JsonEntity? {
+    public func object(_ path:String? = nil) -> JSONEntity? {
         if path == nil { return self }
-        return getField(path, "object", { JsonEntity($0, "object")})
+        return getField(path, "object", { JSONEntity($0, "object")})
     }
     
     public func bool(_ path: String? = nil, ignoreType: Bool = false) -> Bool? {
         return getField(path, "boolean", { $0 == "true" }, ignoreType: ignoreType)
     }
     
-    public func array(_ path:String? = nil) -> [JsonEntity]? {
+    public func array(_ path:String? = nil) -> [JSONEntity]? {
         copyArrayData = true
         let data = decodeData(path == nil ? "-1" : "\(path!).-1")
         if data?.value != "$COMPLETE_ARRAY" || data?.type != "code" {
@@ -71,8 +76,8 @@ public class JsonEntity {
             return nil
         }
         let results = arrayValues.map({value in
-            return JsonEntity(value.value, value.type)
-        }) as [JsonEntity]
+            return JSONEntity(value.value, value.type)
+        }) as [JSONEntity]
         copyArrayData = false
         return results
     }
@@ -81,39 +86,58 @@ public class JsonEntity {
         return decodeData(path) != nil
     }
     
-    public func entries(_ path:String) -> [(key: String, value: JsonEntity)]? {
+    public func entries(_ path:String) -> [(key: String, value: JSONEntity)]? {
         copyObjectEntries = true
-        let data = decodeData("\(path).dummyAtr")
+        let data = decodeData(path.count == 0 ? "dummyAtr" : "\(path).dummyAtr")
         if data?.value != "$COMPLETE_OBJECT" || data?.type != "code" {
             copyObjectEntries = false
             return nil
         }
         let results = objectEntries.map({ value in
-            return (value.key, JsonEntity(value.value, value.type))
-        }) as [(String, JsonEntity)]
+            return (value.key, JSONEntity(value.value, value.type))
+        }) as [(String, JSONEntity)]
         copyObjectEntries = false
         return results
     }
 
-    private func resolveValue(value: String, type: String, ensurePrimitive: Bool = false) -> Any? {
+    private func resolveValue(value: String, type: String, serialization: SerializationType? = nil) -> Any? {
         switch(type) {
             case "number": return Double(value)!
-            case "object": return ensurePrimitive ? value : JsonEntity(value)
-        case "array": return ensurePrimitive ? JsonEntity(value).array()!
+        case "object":
+            if serialization == .none {
+                return JSONEntity(value, "object")
+            }
+            if serialization == .simple {
+                return value
+            }
+            
+            var objData: [String: Any?] = [String: Any?]()
+            JSONEntity(value, type).entries("")!.forEach({
+                key, nestedValue in objData[key] = resolveValue(value: nestedValue.jsonText, type: nestedValue.contentType, serialization: serialization)
+            })
+            return objData
+            
+        case "array":
+            if serialization == .none {
+                return JSONEntity(value, "array").array()!
+            }
+            if serialization == .simple {
+                return value
+            }
+            return JSONEntity(value).array()!
                 .map({ item in
-                    if item.contentType == "array" || item.contentType == "object"
-                    { return item.jsonText }
-                    return resolveValue(value: item.jsonText, type: item.contentType)!
-                })  as [Any] : JsonEntity(value).array()!
+                    return resolveValue(value: item.jsonText, type: item.contentType, serialization: serialization)
+                }) as [Any?]
+            
             case "boolean": return value == "true" ? true : false
             case "null": return nil
             default: return value
         }
     }
     
-    public func value(_ path: String? = nil, serializable: Bool = false) -> (value: Any?, type: JSONType)? {
+    public func value(_ path: String? = nil) -> (value: Any?, type: JSONType)? {
         guard let (value, type) = (path == nil ? (jsonText, contentType) : decodeData(path!)) else { return nil }
-        return (resolveValue(value: value, type: type, ensurePrimitive: serializable), JSONType(type))
+        return (resolveValue(value: value, type: type), JSONType(type))
     }
     
     public func type() -> JSONType {
@@ -122,6 +146,20 @@ public class JsonEntity {
     
     public func dump(_ path: String? = nil) -> String? {
         return path == nil ? jsonText : decodeData(path!)?.value
+    }
+    
+    public func serialize(_ serializeMode: SerializationType) -> Any? {
+        return resolveValue(value: jsonText, type: contentType, serialization: serializeMode)
+    }
+    
+    public func serialize(_ path: String, _ serializeMode: SerializationType) -> Any? {
+        guard let (value, type) = decodeData(path) else { return nil }
+        return resolveValue(value: value, type: type, serialization: serializeMode)
+    }
+    
+    public func capture(_ path: String) -> JSONEntity? {
+        guard let result = decodeData(path) else { return nil }
+        return JSONEntity(result.value, result.type)
     }
             
     private func decodeData(_ inputPath:String) -> (value: String, type: String)? {
@@ -287,7 +325,7 @@ public class JsonEntity {
                     } else {
                         possibleType = ""
                         
-                        if char.isNumber { possibleType = "number" }
+                        if char.isNumber || char == "-" { possibleType = "number" }
                         else if char == "t" || char == "f" { possibleType = "boolean" }
                         else if char == "n" { possibleType = "null" }
                         
