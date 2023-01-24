@@ -21,23 +21,12 @@ let nameValue:String = JSONEntity(jsonText).string("properyA.properyB.2") ?? "de
 ```
 you can use number to access element in an array
 and then use methods. You can use the following methods to access value of given `optional` path
-## Public Methods
 
-- `string()`
-- `array()`
-- `bool()`
-- `number()`
-- `object()`
-- `array()`
-- `value()`
-- `isNull()`
-- `isExist()`
-- `entries()`
-- `type()`
-- `dump()`
+> when accessing array you can use numbers for indexed items. eg: `user.details.contact.2.phoneNumber`
+but don't use any brackets
 
-
-If the key / index does not exist in given path or if the value is another data type from expected formated then `nill` would be given. You don't need to worry about optional chaining you will recieve `nil` if intermediate path also did not exist.
+### Query methods
+In all query methods if the key / indexed item does not exist in given path or if the value is another data type from expected formated then `nill` would be given. You don't need to worry about optional chaining you will recieve `nil` if intermediate path also did not exist.
 
 example:
 ```swift
@@ -48,7 +37,7 @@ JSONEntity(jsonText).number("people.2.wrongKey.details.age") // return nil
 JSONEntity(jsonText).number("people.2.details.name") // return nil since name is not a number
 ```
 
-To check if an value is `null` use `isNull()` method don't assume `nil` as `null` it could be value does not exist at all. `isNull` gives `boolean` based on value is actually `null` or or `nil` if value is not found.
+To check if an value is `null` use `isNull()` method don't assume `nil` as `null` it could be value does not exist at all. To be precise use `isNull` which gives `boolean` based on value is actually `null` or `nil` if value entry is not found.
 
 ### Iterating values in array
 
