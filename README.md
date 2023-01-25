@@ -1,4 +1,4 @@
-# JSONStore (v 1.5) :rocket:
+# JSONStore (v2) :rocket:
 
 Swift is a type constrained lanuage right ? The default way of parsing JSON is to parse json string to a known `Codable` JSON structure. But most of the time you may put hand on unknown JSON structures and difficult to define those structures for all scenarios. JSONStore help you to parse JSON in any free form and extract value without constraining into a fixed type. This is pure zero dependency `Swift` package with simplistic `Read Only Until Value Dicovered` design in mind in a single read cycle and theorically should be performant.
 
@@ -9,7 +9,7 @@ You can use `Swift Package Manager` to Install `JSONStore` from this repository 
 ## Usage
 
 > **Warning**
-> The library does `not` handle incorrect `JSON` formats and do not use escaped character outside JSON `string` values (escaped characters inside `string` values are acceptable). Please make sure to sanatize input string in such cases or otherwise would give you incorrect or unexpected value(s).
+> The library does `not` handle incorrect `JSON` format. Please make sure to sanatize input string in such cases or otherwise would give you incorrect or unexpected value(s).
 
 To access attribute or element you can you a simple `string` path seperated by dot (**`.`**) notation.
 ```swift
@@ -79,11 +79,11 @@ let keyValue: String? = pointer.string("pathC.key1")
 ```
 > Note that this would not change reference of `pointer` as `.object()` deliver new `JSONEntity` object.
 
-### parsing string values
+## Parsing data types
 
-for `number` and `boolean` you can parse from `string` by using `ignoreType` parameter by default it is `false`
+for `number`, `boolean`, `object` and `array` you can parsed from `string` by using `ignoreType` parameter (default `false`)
 - for booleans the string values must be `"true"` or `"false"` (case-sensitive) only.
-- You can also do the same for `object` and `array` as well if double quotation are `escaped` in json `string` values. Of course you have to make sure there are `valid` JSON as well.
+- When parsing `object` and `array` the json string should use `escaped` double quotation (`not` single quotations) for string terminators. Of course you have to make sure the string is `valid` JSON as well.
 
 ```json
 {
@@ -104,7 +104,7 @@ for `number` and `boolean` you can parse from `string` by using `ignoreType` par
 
 ## Handling unknown types
 
-So how do you get value of unknown types ? You can use `value()` method. It gives the natural value of an attribute as a `tuple` containing (key: `Any?`, type: `JSONType`).
+So how do you get value of unknown types ? You can use `value()` method. It gives the natural value of an attribute as a `tuple` containing (value: `Any`, type: `JSONType`).
 
 ```swift
 let (value, type) = jsonRef.value("somePath")
@@ -124,7 +124,7 @@ type  | output
 .boolean | `true` or `false`
 .object | JSONEntity
 .array | [JSONEntity]
-.null | `nil`
+.null | `NSNull`
 
 you could additionally use `type()` to get data type of current json `reference`
 
@@ -134,8 +134,10 @@ Sometimes you may need to write the results on `serializable` destination such a
 
 Serialization  | Behaviour
 --- | ---
-`.simple` | `array` and `object` types will be converted to string
-`.nested` | `array` and `object` will have their inner elements converted to their `natural` values recursively. `object` will be represented by `dictionary`
+`.singular` | `array` and `object` types will be converted to string
+`.container` | `array` and `object` will be converted to `array` and `dictionary` and other `natural` values recursively.
+
+_Remember `null` is represented by `NSNull`. This is to avoid optional wrapping._
 
 ## Capturing references
 
@@ -160,7 +162,6 @@ let value = reference.capture(attributePath)?.string()
 
 ## Future Ideas
 
-- Immune the program for usage of escape characters on `JSON`
 - C implementation for reading `JSON` string
 
 ## Author and Main Contributor
