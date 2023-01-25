@@ -1,4 +1,4 @@
-# JSONStore (v 1.0)
+# JSONStore (v 1.5) :rocket:
 
 Swift is a type constrained lanuage right ? The default way of parsing JSON is to parse json string to a known `Codable` JSON structure. But most of the time you may put hand on unknown JSON structures and difficult to define those structures for all scenarios. JSONStore help you to parse JSON in any free form and extract value without constraining into a fixed type. This is pure zero dependency `Swift` package with simplistic `Read Only Until Value Dicovered` design in mind in a single read cycle and theorically should be performant.
 
@@ -9,7 +9,7 @@ You can use `Swift Package Manager` to Install `JSONStore` from this repository 
 ## Usage
 
 > **Warning**
-> The library does `not` handle incorrect `JSON` formats and some escaped characters (`\"`, `\t` and `\n`) in `JSON` string. Please make sure to sanatize input string in such cases or otherwise would give you incorrect or unexpected value(s).
+> The library does `not` handle incorrect `JSON` formats and do not use escaped character outside JSON `string` values (escaped characters inside `string` values are acceptable). Please make sure to sanatize input string in such cases or otherwise would give you incorrect or unexpected value(s).
 
 To access attribute or element you can you a simple `string` path seperated by dot (**`.`**) notation.
 ```swift
@@ -83,12 +83,14 @@ let keyValue: String? = pointer.string("pathC.key1")
 
 for `number` and `boolean` you can parse from `string` by using `ignoreType` parameter by default it is `false`
 - for booleans the string values must be `"true"` or `"false"` (case-sensitive) only.
+- You can also do the same for `object` and `array` as well if double quotation are `escaped` in json `string` values. Of course you have to make sure there are `valid` JSON as well.
 
 ```json
 {
     "pathA": {
         "numString": "35"
-    }
+    },
+    "sampleData": "{\"inner\": \"awesome\"}"
 }
 ```
 
@@ -96,6 +98,8 @@ for `number` and `boolean` you can parse from `string` by using `ignoreType` par
  let value = jsonReference.number("pathA.numString") // return nil
 
  let value = jsonReference.number("pathA.numString", ignoreType = true) // return 35
+
+ let value = jsonReference.object("sampleData", ignoreType = true).string("inner") // return awesome
 ```
 
 ## Handling unknown types
@@ -158,9 +162,8 @@ let value = reference.capture(attributePath)?.string()
 
 - Immune the program for usage of escape characters on `JSON`
 - C implementation for reading `JSON` string
-- parse `json string` data inside parent `JSON` !
 
 ## Author and Main Contributor
 @Nishain De Silva
 
-`Thoughts` -   _**"** I recently found out it is difficult parse `JSON` on type constrained lanauage unlike in `JavaScript` so I ended up creating my own library for this pourpose! So I thought maybe others face the same problem and why not make other also have a `taste` of what I created **"**_
+`Thoughts` -   _**"** I recently found out it is difficult parse `JSON` on type constrained lanauage unlike in `JavaScript` so I ended up creating my own library for this pourpose! So I thought maybe others face the same problem and why not make other also have a `taste` of what I created **"**_ :sunglasses:

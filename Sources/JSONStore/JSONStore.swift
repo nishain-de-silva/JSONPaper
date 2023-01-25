@@ -1,3 +1,4 @@
+import Foundation
 public class JSONEntity {
     private var jsonText: String
     private var arrayValues:[(value: String, type: String)] = []
@@ -59,16 +60,23 @@ public class JSONEntity {
         return type == "null"
     }
     
-    public func object(_ path:String? = nil) -> JSONEntity? {
+    public func object(_ path:String? = nil, ignoreType: Bool = false) -> JSONEntity? {
         if path == nil { return self }
-        return getField(path, "object", { JSONEntity($0, "object")})
+        return getField(path, "object", {
+            let content = ignoreType ? $0.replacingOccurrences(of: "\\\"", with: "\"") : $0
+            return JSONEntity(content, "object")
+        }, ignoreType: ignoreType)
     }
     
     public func bool(_ path: String? = nil, ignoreType: Bool = false) -> Bool? {
         return getField(path, "boolean", { $0 == "true" }, ignoreType: ignoreType)
     }
     
-    public func array(_ path:String? = nil) -> [JSONEntity]? {
+    public func array(_ path:String? = nil, ignoreType: Bool = false) -> [JSONEntity]? {
+        if ignoreType {
+            guard let arrayContent = getField(path, "string", { $0.replacingOccurrences(of: "\\\"", with: "\"") }, ignoreType: true) else { return nil }
+            return JSONEntity(arrayContent).array()
+        }
         copyArrayData = true
         let data = decodeData(path == nil ? "-1" : "\(path!).-1")
         if data?.value != "$COMPLETE_ARRAY" || data?.type != "code" {
@@ -181,6 +189,7 @@ public class JSONEntity {
         var notationBalance = 0
         var grabbingDataType: String = "string"
         var possibleType: String = ""
+        var escapeCharacter: Bool = false
         
         arrayValues = []
         objectEntries = []
@@ -303,7 +312,7 @@ public class JSONEntity {
             if startSearchValue {
                 if notationBalance == processedPathIndex || (isCountArray && (processedPathIndex + 1) == notationBalance) {
                     
-                    if char == "\"" {
+                    if !escapeCharacter && char == "\"" {
                         isInQuotes = !isInQuotes
                         if isCountArray && elementIndexCursor != pathArrayIndex {
                             if isInQuotes {
@@ -374,6 +383,11 @@ public class JSONEntity {
                 } else if isGrabbingKey {
                     grabbingKey.append(char)
                 }
+            }
+            if char == "\\" {
+                escapeCharacter = true
+            } else if escapeCharacter {
+                escapeCharacter = false
             }
         }
         return nil

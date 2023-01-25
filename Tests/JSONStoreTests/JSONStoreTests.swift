@@ -23,9 +23,9 @@ final class JSONStoreTest: XCTestCase {
         do {
             let jsonData = try Data(contentsOf: URL(fileURLWithPath: path!))
             let entity = JSONEntity(String(data: jsonData, encoding: .utf8)!)
-            entity.entries("features.2.properties")?.forEach({ key, val in
-                print(key)
-            })
+            entity.array("features.0.sample", ignoreType: false)?.map({ print($0.string()!) })
+            
+            print(entity.string("features.0.geometry_name"))
         } catch {
             print(error)
         }
