@@ -108,33 +108,28 @@ public class JSONEntity {
         return results
     }
 
-    private func resolveValue(value: String, type: String, serialization: SerializationType? = nil) -> Any {
+    private func resolveValue(value: String, type: String, serialize: Bool = false) -> Any {
         switch(type) {
             case "number": return Double(value)!
         case "object":
-            if serialization == .none {
+            if !serialize {
                 return JSONEntity(value, "object")
-            }
-            if serialization == .singular {
-                return value
             }
             
             var objData: [String: Any] = [String: Any]()
             JSONEntity(value, type).entries("")!.forEach({
-                key, nestedValue in objData[key] = resolveValue(value: nestedValue.jsonText, type: nestedValue.contentType, serialization: serialization)
+                key, nestedValue in objData[key] = resolveValue(value: nestedValue.jsonText, type: nestedValue.contentType, serialize: serialize)
             })
             return objData
             
         case "array":
-            if serialization == .none {
+            if !serialize {
                 return JSONEntity(value, "array").array()!
             }
-            if serialization == .singular {
-                return value
-            }
+         
             return JSONEntity(value).array()!
                 .map({ item in
-                    return resolveValue(value: item.jsonText, type: item.contentType, serialization: serialization)
+                    return resolveValue(value: item.jsonText, type: item.contentType, serialize: serialize)
                 }) as [Any]
             
             case "boolean": return value == "true" ? true : false
@@ -157,13 +152,13 @@ public class JSONEntity {
         return path == nil ? jsonText : decodeData(path!)?.value
     }
     
-    public func serialize(_ serializeMode: SerializationType) -> Any {
-        return resolveValue(value: jsonText, type: contentType, serialization: serializeMode)
+    public func export() -> Any {
+        return resolveValue(value: jsonText, type: contentType, serialize: true)
     }
     
-    public func serialize(_ path: String, _ serializeMode: SerializationType) -> Any? {
+    public func export(_ path: String) -> Any? {
         guard let (value, type) = decodeData(path) else { return nil }
-        return resolveValue(value: value, type: type, serialization: serializeMode)
+        return resolveValue(value: value, type: type, serialize: true)
     }
     
     public func capture(_ path: String) -> JSONEntity? {

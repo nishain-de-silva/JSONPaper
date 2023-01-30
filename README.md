@@ -130,18 +130,13 @@ you could additionally use `type()` to get data type of current json `reference`
 
 ## Serializing Data
 
-Sometimes you may need to write the results on `serializable` destination such as in-device cache or `POJO`. You can use `serialize` method. There are two mechanism you can serialize data :
-
-Serialization  | Behaviour
---- | ---
-`.singular` | `array` and `object` types will be converted to string
-`.container` | `array` and `object` will be converted to `array` and `dictionary` and other `natural` values recursively.
+Sometimes you may need to write the results on `serializable` destination such as in-device cache. `Array` and `Object` will be converted to `array` and `dictionary` recursively and other primitive types in their `natural` values.
 
 _Remember `null` is represented by `NSNull`. This is to avoid optional wrapping._
 
 ## Capturing references
 
-`capture()` is used to capture for later reference. You can basically query values in 2 ways:
+`capture()` is used to capture the reference of the given path or clone current instance. You can basically query values in 2 ways:
 
 ```swift
 let value = reference.string(attributePath)!
