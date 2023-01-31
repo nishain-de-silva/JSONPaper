@@ -1,4 +1,7 @@
-import Foundation
+public enum Constants {
+    case NULL
+}
+
 public class JSONEntity {
     private var jsonText: String
     private var arrayValues:[(value: String, type: String)] = []
@@ -63,7 +66,7 @@ public class JSONEntity {
     public func object(_ path:String? = nil, ignoreType: Bool = false) -> JSONEntity? {
         if path == nil { return self }
         return getField(path, "object", {
-            let content = ignoreType ? $0.replacingOccurrences(of: "\\\"", with: "\"") : $0
+            let content = ignoreType ? replaceEscapedQuotations($0) : $0
             return JSONEntity(content, "object")
         }, ignoreType: ignoreType)
     }
@@ -74,7 +77,7 @@ public class JSONEntity {
     
     public func array(_ path:String? = nil, ignoreType: Bool = false) -> [JSONEntity]? {
         if ignoreType {
-            guard let arrayContent = getField(path, "string", { $0.replacingOccurrences(of: "\\\"", with: "\"") }, ignoreType: true) else { return nil }
+            guard let arrayContent = getField(path, "string", { replaceEscapedQuotations($0) }, ignoreType: true) else { return nil }
             return JSONEntity(arrayContent).array()
         }
         copyArrayData = true
@@ -84,7 +87,7 @@ public class JSONEntity {
             return nil
         }
         let results = arrayValues.map({value in
-            return JSONEntity(value.value.trimmingCharacters(in: .whitespacesAndNewlines), value.type)
+            return JSONEntity(trimWhiteSpace(value.value, value.type), value.type)
         }) as [JSONEntity]
         copyArrayData = false
         return results
@@ -102,7 +105,7 @@ public class JSONEntity {
             return nil
         }
         let results = objectEntries.map({ value in
-            return (value.key, JSONEntity(value.value.trimmingCharacters(in: .whitespacesAndNewlines), value.type))
+            return (value.key, JSONEntity(trimWhiteSpace(value.value, value.type), value.type))
         }) as [(String, JSONEntity)]
         copyObjectEntries = false
         return results
@@ -133,7 +136,7 @@ public class JSONEntity {
                 }) as [Any]
             
             case "boolean": return value == "true" ? true : false
-            case "null": return NSNull()
+        case "null": return Constants.NULL
             default: return value
         }
     }
@@ -169,8 +172,48 @@ public class JSONEntity {
     private func decodeData(_ inputPath:String) -> (value: String, type: String)? {
         var result = breakdown(inputPath, arrayValues: &arrayValues, objectEntries: &objectEntries, copyArrayData: copyArrayData, copyObjectEntries: copyObjectEntries, jsonText: jsonText)
         if result != nil {
-            result!.value = result!.value.trimmingCharacters(in: .whitespacesAndNewlines)
+            let type = result!.type
+            result!.value = trimWhiteSpace(result!.value, result!.type)
         }
         return result
+    }
+    
+    public enum ReplaceMode {
+        case escapeQuotation
+        case whitespace
+    }
+    
+    private func trimWhiteSpace(_ text: String, _ type: String) -> String{
+        if type == "string" || type == "object" || type == "array" {
+            return text
+        }
+        var replaced: String = ""
+        for char in text {
+            if !char.isWhitespace {
+                replaced.append(char)
+            }
+        }
+        return replaced
+    }
+    
+    public func replaceEscapedQuotations(_ text: String) -> String {
+        var replaced: String = ""
+        var escaped: Bool = false
+        for  char in text {
+            if char == "\\" {
+                escaped = true
+            } else if escaped {
+                if char == "\"" {
+                    replaced.append("\"")
+                } else {
+                    replaced.append("\\")
+                    replaced.append(char)
+                }
+                escaped = false
+            } else {
+                replaced.append(char)
+            }
+        }
+        return replaced
     }
 }

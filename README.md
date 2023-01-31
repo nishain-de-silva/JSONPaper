@@ -124,7 +124,7 @@ type  | output
 .boolean | `true` or `false`
 .object | JSONEntity
 .array | [JSONEntity]
-.null | `NSNull`
+.null | `JSONStore.Constants.NULL`
 
 you could additionally use `type()` to get data type of current json `reference`
 
@@ -132,7 +132,7 @@ you could additionally use `type()` to get data type of current json `reference`
 
 Sometimes you may need to write the results on `serializable` destination such as in-device cache where you have to omit usage of class instances and unwarp its actual value. You can use `export()` for this, `array` and `object` will be converted to `array` and `dictionary` recursively and other primitive types will be converted in their `natural` values.
 
-_Remember `null` is represented by `NSNull`. This is to avoid optional wrapping._
+_Remember `null` is represented by `JSONStore.Constants.NULL`. This is to avoid optional wrapping._
 
 ## Capturing references
 
