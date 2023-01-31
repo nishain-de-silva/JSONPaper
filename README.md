@@ -130,7 +130,7 @@ you could additionally use `type()` to get data type of current json `reference`
 
 ## Serializing Data
 
-Sometimes you may need to write the results on `serializable` destination such as in-device cache. `Array` and `Object` will be converted to `array` and `dictionary` recursively and other primitive types in their `natural` values.
+Sometimes you may need to write the results on `serializable` destination such as in-device cache where you have to omit usage of class instances and unwarp its actual value. You can use `export()` for this, `array` and `object` will be converted to `array` and `dictionary` recursively and other primitive types will be converted in their `natural` values.
 
 _Remember `null` is represented by `NSNull`. This is to avoid optional wrapping._
 
@@ -154,10 +154,6 @@ let value = reference.capture(attributePath)?.string()
     In JSON data if keyB happens to be an `string` or another primitive type instead of container type of either `object` or `array` then last found intermediete primitive value (in this case string value of keyB) will be return instead of `nil`.
 
 - To dump data at a particular node for `debugging` pourpose you can always use `.dump(attributePath)` as it always give the value in `string` format unless attribute was not found which would give `nil`.
-
-## Future Ideas
-
-- C implementation for reading `JSON` string
 
 ## Author and Main Contributor
 @Nishain De Silva

@@ -139,13 +139,14 @@ func breakdown(_ inputPath:String, arrayValues: inout [(value: String, type: Str
                 }
                 continue
             }
-            if isGrabbingNotation {
-                grabbedText.append(char)
-                continue
-            }
         }
         
-        if startSearchValue {
+        if isGrabbingNotation {
+            if !escapeCharacter && char == "\"" {
+                isInQuotes = !isInQuotes
+            }
+            grabbedText.append(char)
+        } else if startSearchValue {
             if notationBalance == processedPathIndex || (isCountArray && (processedPathIndex + 1) == notationBalance) {
                 // ignore escaped double quotation characters inside string values...
                 if !escapeCharacter && char == "\"" {
@@ -218,31 +219,36 @@ func breakdown(_ inputPath:String, arrayValues: inout [(value: String, type: Str
                         grabbedText.append(char)
                     }
                 }
+            } else if char == "\"" && !escapeCharacter {
+                isInQuotes = !isInQuotes
             }
             
             // section responsible for finding matching key in object notation
         } else {
-            // grabbing the matching correct object key as given in path
-            if (processedPathIndex + 1) == notationBalance && char == "\"" {
-                isGrabbingKey = !isGrabbingKey
+            if char == "\"" && !escapeCharacter {
                 isInQuotes = !isInQuotes
-                if !isGrabbingKey {
-                    // if found start searching for object value for object key
-                    if (copyObjectEntries && (processedPathIndex + 1) == paths.count) || grabbingKey == paths[processedPathIndex] {
-                        processedPathIndex += 1
-                        startSearchValue = true
+                // grabbing the matching correct object key as given in path
+                if (processedPathIndex + 1) == notationBalance {
+                    isGrabbingKey = !isGrabbingKey
+                    if !isGrabbingKey {
+                        // if found start searching for object value for object key
+                        if (copyObjectEntries && (processedPathIndex + 1) == paths.count) || grabbingKey == paths[processedPathIndex] {
+                            processedPathIndex += 1
+                            startSearchValue = true
+                        }
+                    } else {
+                        grabbingKey = ""
                     }
-                } else {
-                    grabbingKey = ""
                 }
             } else if isGrabbingKey {
                 grabbingKey.append(char)
             }
         }
-        if char == "\\" {
-            escapeCharacter = true
-        } else if escapeCharacter {
+        
+        if escapeCharacter {
             escapeCharacter = false
+        } else if char == "\\" {
+            escapeCharacter = true
         }
     }
     return nil

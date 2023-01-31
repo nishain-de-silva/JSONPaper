@@ -24,7 +24,7 @@ final class JSONStoreTest: XCTestCase {
             let jsonData = try Data(contentsOf: URL(fileURLWithPath: path!))
             let entity = JSONEntity(String(data: jsonData, encoding: .utf8)!)
             entity.array("features.0.sample", ignoreType: false)?.forEach({
-                print($0.serialize(.container))
+                print($0.export())
             })
         } catch {
             print(error)
