@@ -172,7 +172,6 @@ public class JSONEntity {
     private func decodeData(_ inputPath:String) -> (value: String, type: String)? {
         var result = breakdown(inputPath, arrayValues: &arrayValues, objectEntries: &objectEntries, copyArrayData: copyArrayData, copyObjectEntries: copyObjectEntries, jsonText: jsonText)
         if result != nil {
-            let type = result!.type
             result!.value = trimWhiteSpace(result!.value, result!.type)
         }
         return result
@@ -196,7 +195,7 @@ public class JSONEntity {
         return replaced
     }
     
-    public func replaceEscapedQuotations(_ text: String) -> String {
+    private func replaceEscapedQuotations(_ text: String) -> String {
         var replaced: String = ""
         var escaped: Bool = false
         for  char in text {
