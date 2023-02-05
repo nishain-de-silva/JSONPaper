@@ -3,7 +3,8 @@ public enum Constants {
 }
 
 public class JSONEntity {
-    private var jsonText: String
+    private var jsonText: String = ""
+    private var jsonData: UnsafeRawBufferPointer = UnsafeRawBufferPointer.init(start: nil, count: 0)
     private var arrayValues:[(value: String, type: String)] = []
     private var objectEntries:[(key: String, value: String, type: String)] = []
     private var contentType:String
@@ -37,6 +38,10 @@ public class JSONEntity {
         }
     }
     
+    public init() {
+        contentType = "string"
+    }
+    
     private init(_ json: String, _ type: String) {
         jsonText = json
         contentType = type
@@ -61,6 +66,11 @@ public class JSONEntity {
             return nil
         }
         return type == "null"
+    }
+    
+    public func justGet(_ path: String) -> String? {
+//        return justIteratebreakdown(path, arrayValues: &arrayValues, objectEntries: &objectEntries, copyArrayData: copyArrayData, copyObjectEntries: copyObjectEntries, jsonText: jsonText)?.value
+        return breakdown(path, arrayValues: &arrayValues, objectEntries: &objectEntries, copyArrayData: copyArrayData, copyObjectEntries: copyObjectEntries)?.value
     }
     
     public func object(_ path:String? = nil, ignoreType: Bool = false) -> JSONEntity? {
@@ -170,14 +180,18 @@ public class JSONEntity {
     }
     
     private func decodeData(_ inputPath:String) -> (value: String, type: String)? {
-        var result = breakdown(inputPath, arrayValues: &arrayValues, objectEntries: &objectEntries, copyArrayData: copyArrayData, copyObjectEntries: copyObjectEntries, jsonText: jsonText)
+        var result = breakdown(inputPath, arrayValues: &arrayValues, objectEntries: &objectEntries, copyArrayData: copyArrayData, copyObjectEntries: copyObjectEntries)
         if result != nil {
             result!.value = trimWhiteSpace(result!.value, result!.type)
         }
         return result
     }
+    
+    public func fetchBytes() -> ((UnsafeRawBufferPointer) -> Void) {
+        return { self.jsonData = $0 }
+    }
             
-    func breakdown(_ inputPath:String, arrayValues: inout [(value: String, type: String)], objectEntries: inout [(key: String, value: String, type: String)], copyArrayData: Bool, copyObjectEntries: Bool, jsonText: String  ) -> (value: String, type: String)? {
+    func breakdown(_ inputPath:String, arrayValues: inout [(value: String, type: String)], objectEntries: inout [(key: String, value: String, type: String)], copyArrayData: Bool, copyObjectEntries: Bool) -> (value: String, type: String)? {
         let paths = inputPath.split(separator: ".")
         var processedPathIndex = 0
 
@@ -201,8 +215,9 @@ public class JSONEntity {
         arrayValues = []
         objectEntries = []
         
-        for char in jsonText {
+        for byte in jsonData {
             // if within quotation ignore processing json literals...
+            let char = Character(UnicodeScalar(byte))
             if !isInQuotes {
                 if char == "{" || char == "[" {
                     notationBalance += 1
@@ -439,6 +454,13 @@ public class JSONEntity {
         }
         return replaced
     }
+    
+    private func justIteratebreakdown(_ inputPath:String, arrayValues: inout [(value: String, type: String)], objectEntries: inout [(key: String, value: String, type: String)], copyArrayData: Bool, copyObjectEntries: Bool, jsonText: String) -> (value: String, type: String)? {
+        for char in jsonText {
+            
+        }
+        return ("Hello", "string")
+    };
     
     private func replaceEscapedQuotations(_ text: String) -> String {
         var replaced: String = ""

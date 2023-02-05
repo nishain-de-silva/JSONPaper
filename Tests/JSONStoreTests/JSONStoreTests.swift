@@ -19,19 +19,24 @@ final class JSONStoreTest: XCTestCase {
     }
 
     func executeRun() {
-        let path = Bundle.module.path(forResource: "sampleData", ofType: "json")
+        let path = Bundle.module.path(forResource: "large-file", ofType: "json")
         do {
             let jsonData = try Data(contentsOf: URL(fileURLWithPath: path!))
-            let entity = JSONEntity(String(data: jsonData, encoding: .utf8)!)
-            print(entity.export("features.0.sample"))
+//            var inputString = String(data: jsonData, encoding: .utf8)!
+            let start = Date()
+            let entity = JSONEntity()
+            jsonData.withUnsafeBytes(entity.fetchBytes())
+            let id = entity.justGet("11350.id")!
+            print(id)
+            print("elapsed time - ", Date().timeIntervalSince(start))
         } catch {
             print(error)
         }
-
     }
     
     
     func testExample() throws {
+        
         // This is an example of a functional test case.
         // Use XCTAssert and related functions to verify your tests produce the correct results.
         // Any test you write for XCTest can be annotated as throws and async.

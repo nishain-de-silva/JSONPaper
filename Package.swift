@@ -24,7 +24,6 @@ let package = Package(
         .testTarget(
             name: "JSONStoreTests",
             dependencies: ["JSONStore"],
-            resources: [.process("sampleData.json")]
-        ),
+            resources: [.process("large-file.json")]        ),
     ]
 )
