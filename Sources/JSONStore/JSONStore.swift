@@ -5,6 +5,7 @@ public enum Constants {
 public class JSONEntity {
     private var jsonText: String = ""
     private var jsonData: UnsafeRawBufferPointer = UnsafeRawBufferPointer.init(start: nil, count: 0)
+    private var isBytes:Bool
     private var arrayValues:[(value: String, type: String)] = []
     private var objectEntries:[(key: String, value: String, type: String)] = []
     private var contentType:String
@@ -36,15 +37,18 @@ public class JSONEntity {
             case "[": contentType = "array"
             default: contentType = "string"
         }
+        isBytes = false
     }
     
     public init() {
-        contentType = "string"
+        contentType = "notInit"
+        isBytes = true
     }
     
     private init(_ json: String, _ type: String) {
         jsonText = json
         contentType = type
+        isBytes = false
     }
     
     private func getField <T>(_ path: String?, _ fieldName: String, _ mapper: (String) -> T?, ignoreType:Bool = false) -> T? {
@@ -70,7 +74,7 @@ public class JSONEntity {
     
     public func justGet(_ path: String) -> String? {
 //        return justIteratebreakdown(path, arrayValues: &arrayValues, objectEntries: &objectEntries, copyArrayData: copyArrayData, copyObjectEntries: copyObjectEntries, jsonText: jsonText)?.value
-        return breakdown(path, arrayValues: &arrayValues, objectEntries: &objectEntries, copyArrayData: copyArrayData, copyObjectEntries: copyObjectEntries)?.value
+        return decodeBytes(path, arrayValues: &arrayValues, objectEntries: &objectEntries, copyArrayData: copyArrayData, copyObjectEntries: copyObjectEntries)?.value
     }
     
     public func object(_ path:String? = nil, ignoreType: Bool = false) -> JSONEntity? {
@@ -180,7 +184,7 @@ public class JSONEntity {
     }
     
     private func decodeData(_ inputPath:String) -> (value: String, type: String)? {
-        var result = breakdown(inputPath, arrayValues: &arrayValues, objectEntries: &objectEntries, copyArrayData: copyArrayData, copyObjectEntries: copyObjectEntries)
+        var result = decodeBytes(inputPath, arrayValues: &arrayValues, objectEntries: &objectEntries, copyArrayData: copyArrayData, copyObjectEntries: copyObjectEntries)
         if result != nil {
             result!.value = trimWhiteSpace(result!.value, result!.type)
         }
@@ -191,7 +195,7 @@ public class JSONEntity {
         return { self.jsonData = $0 }
     }
             
-    func breakdown(_ inputPath:String, arrayValues: inout [(value: String, type: String)], objectEntries: inout [(key: String, value: String, type: String)], copyArrayData: Bool, copyObjectEntries: Bool) -> (value: String, type: String)? {
+    func decodeBytes(_ inputPath:String, arrayValues: inout [(value: String, type: String)], objectEntries: inout [(key: String, value: String, type: String)], copyArrayData: Bool, copyObjectEntries: Bool) -> (value: String, type: String)? {
         let paths = inputPath.split(separator: ".")
         var processedPathIndex = 0
 
@@ -215,11 +219,10 @@ public class JSONEntity {
         arrayValues = []
         objectEntries = []
         
-        for byte in jsonData {
+        for char in jsonData {
             // if within quotation ignore processing json literals...
-            let char = Character(UnicodeScalar(byte))
             if !isInQuotes {
-                if char == "{" || char == "[" {
+                if char == 123 || char == 91 {
                     notationBalance += 1
                     if isCountArray && !isGrabbingMultipleValues {
                         // ignore processing if element in not matching the array index except when grabbing all elements on array
@@ -228,9 +231,9 @@ public class JSONEntity {
                             // start grabbing array/object array elements on isGrabbingMultipleValues mode
                             if isGrabbingMultipleValues {
                                 if notationBalance == processedPathIndex + 2 {
-                                    grabbingDataType = char == "{" ? "object" : "array"
+                                    grabbingDataType = char == 123 ? "object" : "array"
                                 }
-                                grabbedText.append(char)
+                                grabbedText.append(Character(UnicodeScalar(char)))
                             }
                             continue
                         }
@@ -242,17 +245,17 @@ public class JSONEntity {
                     if (processedPathIndex == paths.count || isGrabbingMultipleValues) && !isGrabbingNotation {
                         grabbedText = ""
                         isGrabbingNotation = true
-                        grabbingDataType = char == "{" ? "object" : "array"
+                        grabbingDataType = char == 123 ? "object" : "array"
                     }
                     
                     // continue copying object/arrray inner characters...
                     if isGrabbingNotation {
-                        grabbedText.append(char)
+                        grabbedText.append(Character(UnicodeScalar(char)))
                         continue
                     }
                     
                     // intiate elements counting inside array on reaching open bracket...
-                    if char == "[" && !isCountArray && (processedPathIndex + 1) == notationBalance {
+                    if char == 91 && !isCountArray && (processedPathIndex + 1) == notationBalance {
                         let parsedIndex = Int(paths[processedPathIndex])
                         // occur when trying to access element of array with non-number index
                         if parsedIndex == nil {
@@ -274,13 +277,13 @@ public class JSONEntity {
                     continue
                 }
                 
-                if char == "}" || char == "]" {
+                if char == 125 || char == 93 {
                     notationBalance -= 1
                     
                     // if a primitive value is in proccess copying then return copied value
                     if isGrabbingText {
                         // when finished copy last primitive value on copyObjectEntries mode. Need to make sure the parent container notation is an object
-                        if copyObjectEntries && char == "}" {
+                        if copyObjectEntries && char == 125 {
                             objectEntries.append((grabbingKey, grabbedText, grabbingDataType))
                             return ("$COMPLETE_OBJECT", "code")
                         } else if isGrabbingMultipleValues {
@@ -290,11 +293,11 @@ public class JSONEntity {
                             return (grabbedText, grabbingDataType)
                         }
                     }
-                    if isGrabbingNotation { grabbedText.append(char) }
+                    if isGrabbingNotation { grabbedText.append(Character(UnicodeScalar(char))) }
                     
                     // occur after all element in foccused array or object is finished searching...
                     if notationBalance == processedPathIndex {
-                        if isCountArray && char == "]" {
+                        if isCountArray && char == 93 {
                             // occur when when not matching element is found for given array index and array finished iterating...
                             if isGrabbingMultipleValues {
                                 return ("$COMPLETE_ARRAY", "code")
@@ -303,7 +306,7 @@ public class JSONEntity {
                         }
                         
                         // exit occur after no matching key is found in object
-                        if char == "}" && !startSearchValue {
+                        if char == 125 && !startSearchValue {
                             if copyObjectEntries { return ("$COMPLETE_OBJECT", "code") }
                             return nil
                         }
@@ -330,14 +333,14 @@ public class JSONEntity {
             }
             
             if isGrabbingNotation {
-                if !escapeCharacter && char == "\"" {
+                if !escapeCharacter && char == 34 {
                     isInQuotes = !isInQuotes
                 }
-                grabbedText.append(char)
+                grabbedText.append(Character(UnicodeScalar(char)))
             } else if startSearchValue {
                 if notationBalance == processedPathIndex || (isCountArray && (processedPathIndex + 1) == notationBalance) {
                     // ignore escaped double quotation characters inside string values...
-                    if !escapeCharacter && char == "\"" {
+                    if !escapeCharacter && char == 34 {
                         isInQuotes = !isInQuotes
                         // array index matching does not apply on isGrabbingMultipleValues as need to proccess all elements in the array
                         if isCountArray && !isGrabbingMultipleValues && elementIndexCursor != pathArrayIndex {
@@ -371,18 +374,18 @@ public class JSONEntity {
                         
                         possibleType = ""
                         
-                        if char.isNumber || char == "-" { possibleType = "number" }
-                        else if char == "t" || char == "f" { possibleType = "boolean" }
-                        else if char == "n" { possibleType = "null" }
+                        if (char >= 48 && char <= 57) || char == 45 { possibleType = "number" }
+                        else if char == 116 || char == 102 { possibleType = "boolean" }
+                        else if char == 110 { possibleType = "null" }
                         
                         if !isInQuotes && !isGrabbingText && possibleType != "" {
                             grabbingDataType = possibleType
                             if isCountArray && !isGrabbingMultipleValues && elementIndexCursor != pathArrayIndex { continue }
                             grabbedText = ""
-                            grabbedText.append(char)
+                            grabbedText.append(Character(UnicodeScalar(char)))
                             isGrabbingText = true
                             continue
-                        } else if !isInQuotes && char == "," {
+                        } else if !isInQuotes && char == 44 {
                             if isCountArray {
                                 elementIndexCursor += 1
                             }
@@ -404,16 +407,16 @@ public class JSONEntity {
                                 }
                             }
                         } else if isGrabbingText {
-                            grabbedText.append(char)
+                            grabbedText.append(Character(UnicodeScalar(char)))
                         }
                     }
-                } else if char == "\"" && !escapeCharacter {
+                } else if char == 34 && !escapeCharacter {
                     isInQuotes = !isInQuotes
                 }
                 
                 // section responsible for finding matching key in object notation
             } else {
-                if char == "\"" && !escapeCharacter {
+                if char == 34 && !escapeCharacter {
                     isInQuotes = !isInQuotes
                     // grabbing the matching correct object key as given in path
                     if (processedPathIndex + 1) == notationBalance {
@@ -429,13 +432,13 @@ public class JSONEntity {
                         }
                     }
                 } else if isGrabbingKey {
-                    grabbingKey.append(char)
+                    grabbingKey.append(Character(UnicodeScalar(char)))
                 }
             }
             
             if escapeCharacter {
                 escapeCharacter = false
-            } else if char == "\\" {
+            } else if char == 92 {
                 escapeCharacter = true
             }
         }

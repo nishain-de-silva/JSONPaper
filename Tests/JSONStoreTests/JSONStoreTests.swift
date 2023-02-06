@@ -22,11 +22,15 @@ final class JSONStoreTest: XCTestCase {
         let path = Bundle.module.path(forResource: "large-file", ofType: "json")
         do {
             let jsonData = try Data(contentsOf: URL(fileURLWithPath: path!))
-//            var inputString = String(data: jsonData, encoding: .utf8)!
             let start = Date()
             let entity = JSONEntity()
             jsonData.withUnsafeBytes(entity.fetchBytes())
-            let id = entity.justGet("11350.id")!
+//            jsonData.withUnsafeBytes({
+//                for char in $0 {
+//                    print(char)
+//                }
+//            })
+            let id = entity.justGet("11350.actor.url")!
             print(id)
             print("elapsed time - ", Date().timeIntervalSince(start))
         } catch {
