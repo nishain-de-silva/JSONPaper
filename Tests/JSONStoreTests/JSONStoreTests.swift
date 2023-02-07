@@ -25,12 +25,7 @@ final class JSONStoreTest: XCTestCase {
             let start = Date()
             let entity = JSONEntity()
             jsonData.withUnsafeBytes(entity.fetchBytes())
-//            jsonData.withUnsafeBytes({
-//                for char in $0 {
-//                    print(char)
-//                }
-//            })
-            let id = entity.justGet("11350.actor.url")!
+            let id = entity.object("11346.payload.issue")?.array("labels")
             print(id)
             print("elapsed time - ", Date().timeIntervalSince(start))
         } catch {

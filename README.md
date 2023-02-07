@@ -1,6 +1,6 @@
 # JSONStore (v2) :rocket:
 
-Swift is a type constrained lanuage right ? The default way of parsing JSON is to parse json string to a known `Codable` JSON structure. But most of the time you may put hand on unknown JSON structures and difficult to define those structures for all scenarios. JSONStore help you to parse JSON in any free form and extract value without constraining into a fixed type. This is pure zero dependency `Swift` package with simplistic `Read Only Until Value Dicovered` design in mind in a single read cycle and theorically should be performant.
+Swift is a type constrained lanuage right ? The default way of parsing JSON is to parse json string to a known `Codable` JSON structure. But most of the time you may put hand on unknown JSON structures and difficult to define those structures for all scenarios. JSONStore help you to parse JSON in any free form and extract value without constraining into a fixed type. This is pure zero dependency `Swift` package with `Read Only Until Value Dicovered` mechanism in a single read cycle and performance efficient.
 
 ## Installation
 
@@ -30,14 +30,31 @@ In all query methods if the key / indexed item does not exist in given path or i
 
 example:
 ```swift
-JSONEntity(jsonText).number("people.2.details.age") // return age
+let jsonStore = JSONEntity(jsonText)
 
-JSONEntity(jsonText).number("people.2.wrongKey.details.age") // return nil
+jsonStore.number("people.2.details.age") // return age
 
-JSONEntity(jsonText).number("people.2.details.name") // return nil since name is not a number
+jsonStore.number("people.2.wrongKey.details.age") // return nil
+
+jsonStore.number("people.2.details.name") // return nil since name is not a number
 ```
 
 To check if an value is `null` use `isNull()` method don't assume `nil` as `null` it could be value does not exist at all. To be precise use `isNull` which gives `boolean` based on value is actually `null` or `nil` if value entry is not found.
+
+## Initiializing
+
+There are two ways to intitialize JSONStore
+```swift
+let entity = entity(jsonAsString) 
+// or...
+let networkData = Data(...)
+let entity = JSONEntity()
+networkData.withUnsafeBytes(entity.fetchBytes())
+```
+
+> The second method may seems strange but JSONStore is a zero dependency library  therefore don't use `Foundation` and cannot resolve `Data` instance types therefore you have to send data from a pointer.
+> **Warning**
+> **Both input string and data must be represented in `UTC-8` format**
 
 ### Iterating values in array
 
