@@ -23,11 +23,6 @@ public class JSONEntity {
             self = .init(rawValue: v)!
         }
     }
-    
-    public enum SerializationType {
-        case singular
-        case container
-    }
         
     public init(_ json:String) {
         jsonText = json
