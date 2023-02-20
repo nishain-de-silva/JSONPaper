@@ -1,6 +1,6 @@
 # JSONStore (v2) :rocket:
 
-Swift is a type constrained lanuage right ? The default way of parsing JSON is to parse json string to a known `Codable` JSON structure. But most of the time you may put hand on unknown JSON structures and difficult to define those structures for all scenarios. JSONStore help you to parse JSON in any free form and extract value without constraining into a fixed type. This is pure zero dependency `Swift` package with `Read Only Until Value Dicovered` mechanism in a single read cycle and performance efficient.
+Swift is a type constrained lanuage right ? The default way of parsing JSON is to parse json string to a known `Codable` JSON structure. But most of the time you may put hand on unknown JSON structures and difficult to define those structures for all scenarios. JSONStore ishelp you to parse JSON in any free form and extract value without constraining into a fixed type. This is pure zero dependency `Swift` package with `Read Only Until Value Dicovered` mechanism in a single read cycle and performance efficient.
 
 ## Installation
 
@@ -9,8 +9,29 @@ You can use `Swift Package Manager` to Install `JSONStore` from this repository 
 ## Usage
 
 > **Warning**
-> The library does `not` handle incorrect `JSON` format. Please make sure to sanatize input string in such cases or otherwise would give you incorrect or unexpected value(s).
+> The library does `not` handle incorrect `JSON` format. Please make sure to sanatize input string in such cases or otherwise would give you incorrect or unexpected value(s). JSON content must be decodable on `UTF` format (Best tested on `UTF-8` format).
+## Intializing
 
+There are handful of ways to initialize JSONStore. You can initialize by `string` or from `Data` instance. Initializing from `Data` is bit trickier as JSONStore does not use `Foundation` so it cannot resolve `Data` type. Hence you have to provide `UnsafeRawBufferPointer` instance instead. You can also provide function which require map callback (eg: `Data.withUnsafeBytes` as constructor parameter _(see [withUnsafeBytes](https://developer.apple.com/documentation/swift/array/withunsafebytes(_:)) to learn about such callbacks)_.
+
+```swift
+// with string ...
+let jsonAsString = "{...}"
+let json = JSONEntity(jsonAsString)
+
+// ways of initilzing with byte data...
+
+let networkData = Data() // your json data
+
+let json = JSONEntity(networkData.withUnsafeBytes) // see simple :)
+
+// or
+let bufferPointer: UnsafeRawBufferPointer = networkData.withUnsafeBytes({$0})
+
+let json = JSONEntity(bufferPointer)
+```
+
+## Reading Values
 To access attribute or element you can you a simple `string` path seperated by dot (**`.`**) notation.
 ```swift
 import JSONStore
@@ -28,7 +49,7 @@ but don't use any brackets
 ### Query methods
 In all query methods if the key / indexed item does not exist in given path or if the value is another data type from expected formated then `nill` would be given. You don't need to worry about optional chaining you will recieve `nil` if intermediate path also did not exist.
 
-example:
+**example**:
 ```swift
 let jsonStore = JSONEntity(jsonText)
 
@@ -40,61 +61,6 @@ jsonStore.number("people.2.details.name") // return nil since name is not a numb
 ```
 
 To check if an value is `null` use `isNull()` method don't assume `nil` as `null` it could be value does not exist at all. To be precise use `isNull` which gives `boolean` based on value is actually `null` or `nil` if value entry is not found.
-
-## Initiializing
-
-There are two ways to intitialize JSONStore
-```swift
-let entity = entity(jsonAsString) 
-// or...
-let networkData = Data(...)
-let entity = JSONEntity()
-networkData.withUnsafeBytes(entity.fetchBytes())
-```
-
-> The second method may seems strange but JSONStore is a zero dependency library  therefore don't use `Foundation` and cannot resolve `Data` instance types therefore you have to send data from a pointer.
-> **Warning**
-> **Both input string and data must be represented in `UTC-8` format**
-
-### Iterating values in array
-
-If you need to acesss value is an array you can use:
-```swift
-guard let hobbies:[JSONEntity] = JSONEntity(jsonText).array("people.2.hobbies") else { return "No hobbies :(" }
-
-hobbies[0].string() // hobby 1
-```
-### Iterating values in object
-You can also iterate values and keys in JSON objects as `tuple` of `key-value` pair. Suppose we have JSON like this
-
-```json
-{
-    "person": {
-        "name": "Sam",
-        "age": 25,
-        "additionalData": null
-    }
-}
-```
-
-
-```swift
-guard let entries = JSONEntity(jsonText).entries("person") else { return "NotAnObject" }
-
-let attributeKey = entries[0].key // name
-let values = entries[0].value.string() // Sam
-```
-
-You can also keep record of intermediate `reference instance` for later use and do chaining.
-
-```swift
-
-let pointer = JSONEntity(jsonText).object("pathA.pathB") // return JSONEntity
-
-let keyValue: String? = pointer.string("pathC.key1")
-
-```
-> Note that this would not change reference of `pointer` as `.object()` deliver new `JSONEntity` object.
 
 ## Parsing data types
 
@@ -149,7 +115,7 @@ you could additionally use `type()` to get data type of current json `reference`
 
 Sometimes you may need to write the results on `serializable` destination such as in-device cache where you have to omit usage of class instances and unwarp its actual value. You can use `export()` for this, `array` and `object` will be converted to `array` and `dictionary` recursively and other primitive types will be converted in their `natural` values.
 
-_Remember `null` is represented by `JSONStore.Constants.NULL`. This is to avoid optional wrapping._
+_Remember `null` is represented  by `JSONStore.Constants.NULL`. This is to avoid optional wrapping._
 
 ## Capturing references
 

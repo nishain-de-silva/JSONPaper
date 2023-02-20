@@ -18,14 +18,15 @@ public class JSONEntity {
         case array = "array"
         case number = "number"
         case null = "null"
+        case unclassified = "notInit"
         
         init(_ v: String) {
             self = .init(rawValue: v)!
         }
     }
         
-    public init(_ json:String) {
-        jsonText = json
+    public init(_ jsonString: String) {
+        jsonText = jsonString
         switch (jsonText.first) {
             case "{": contentType = "object"
             case "[": contentType = "array"
@@ -34,9 +35,43 @@ public class JSONEntity {
         jsonData = UnsafeRawBufferPointer(start: jsonText.withUTF8({$0}).baseAddress, count: jsonText.count)
     }
     
-    public init() {
-        contentType = "notInit"
+    public init(_ jsonBufferPointer: UnsafeRawBufferPointer) {
+        jsonData = jsonBufferPointer
+        switch(jsonData.first) {
+            case 123: contentType = "object"
+            case 91: contentType = "array"
+            default: contentType = "string"
+        }
     }
+    
+    public init(_ provider:  ((UnsafeRawBufferPointer?) throws -> UnsafeRawBufferPointer?) throws -> UnsafeRawBufferPointer?) {
+        guard let buffer = try? provider({$0}) else {
+            print("[JSONStore] instance has not properly initialized. Problem had occured when assigning input data buffer which occur when the provider callback given on .init(provider:) gives nil or when exception thrown within provider callback itself. Check the result given by by provider callback to resolve the issue.")
+            contentType = "notInit"
+            return
+        }
+        jsonData = buffer
+        switch(jsonData.first) {
+            case 123: contentType = "object"
+            case 91: contentType = "array"
+            default: contentType = "string"
+        }
+    }
+
+    public init(_ provider:  ((UnsafeRawBufferPointer?)  -> UnsafeRawBufferPointer?) -> UnsafeRawBufferPointer?) {
+        guard let buffer = provider({$0}) else {
+            print("[JSONStore] instance has not properly initialized. This problem occur when the provider callback given on .init(provider:) gives nil instead of UnsafeRawBufferPointer instance")
+            contentType = "notInit"
+            return
+        }
+        jsonData = buffer
+        switch(jsonData.first) {
+            case 123: contentType = "object"
+            case 91: contentType = "array"
+            default: contentType = "string"
+        }
+    }
+
     
     private init(_ json: String, _ type: String) {
         jsonText = json
@@ -167,29 +202,20 @@ public class JSONEntity {
     }
     
     private func decodeData(_ inputPath:String) -> (value: String, type: String)? {
-        var result = decodeBytes(inputPath, arrayValues: &arrayValues, objectEntries: &objectEntries, copyArrayData: copyArrayData, copyObjectEntries: copyObjectEntries)
-        if result != nil {
-            result!.value = trimWhiteSpace(result!.value, result!.type)
+        do {
+            var result = try decodeBytes(inputPath, arrayValues: &arrayValues, objectEntries: &objectEntries, copyArrayData: copyArrayData, copyObjectEntries: copyObjectEntries)
+            if result != nil {
+                result!.value = trimWhiteSpace(result!.value, result!.type)
+            }
+            return result
+        } catch {
+            print("I got a problem")
+            return nil
         }
-        return result
     }
     
-    public func fetchBytes() -> ((UnsafeRawBufferPointer) -> Void) {
-        return {
-            self.jsonData = $0
-            switch(self.jsonData.first) {
-                case 123: self.contentType = "object"
-                case 91: self.contentType = "array"
-                default: self.contentType = "string"
-            }
-        }
-    }
-            
-    func decodeBytes(_ inputPath:String, arrayValues: inout [JSONEntity], objectEntries: inout [(key: String, value: JSONEntity)], copyArrayData: Bool, copyObjectEntries: Bool) -> (value: String, type: String)? {
+    func decodeBytes(_ inputPath:String, arrayValues: inout [JSONEntity], objectEntries: inout [(key: String, value: JSONEntity)], copyArrayData: Bool, copyObjectEntries: Bool) throws -> (value: String, type: String)? {
         if !(contentType == "object" || contentType == "array") {
-            if contentType == "notInit" {
-                print("[JSONEntity] input bytes have given yet!")
-            }
             return nil
         }
         let paths = inputPath.split(separator: ".")
