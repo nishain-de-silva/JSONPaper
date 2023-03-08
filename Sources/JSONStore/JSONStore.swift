@@ -560,7 +560,6 @@ public class JSONEntity {
                             // if found start searching for object value for object key
                             if (copyObjectEntries && (processedPathIndex + 1) == paths.count) || grabbingKey == paths[processedPathIndex] {
                                 processedPathIndex += 1
-                                print("key", grabbingKey)
                                 if isNavigatingUnknownPath {
                                     isNavigatingUnknownPath = false
                                     additionalTransversals = notationBalance - processedPathIndex
