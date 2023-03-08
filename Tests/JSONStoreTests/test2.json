@@ -1,0 +1,82 @@
+{
+   "root": {
+      "another": [
+         34,
+         {
+            "waking": "good morning",
+            "day": 24,
+            "dota": "kp",
+            "temperature": 56,
+            "moredetails": {
+               "ahago": "hello",
+               "temperature": 87,
+               "day": 52,
+               "someList": [47]
+            },
+            "location": {
+               "district": "southern province",
+               "place": "Galle",
+               "meta": {
+                   "lamo": 45
+               }
+            }
+         }
+      ],
+      "other": [
+          55,
+          {
+              "location": {
+                  
+                  "meta": {
+                      "point": 32
+                  }
+              },
+              "dat": 57
+          }
+      ],
+      "geologicalInformation": {
+         "speciesType": "flower",
+         "recipents": "bees",
+         "consumers": [
+            "king-fisher",
+            "magapie",
+            "cats"
+         ],
+         "predator": {
+            "mindSummary": {
+               "info": "eager and playful and sometimes very bored and require sleep"
+            },
+            "anatomy": "big eyes with tail"
+         }
+      },
+      "creditaInfo": {
+         "futurePlans": [
+            [
+               {
+                  "geoSpeare": "enwrapped the sun with materials from asteroid to extract energery"
+               }
+            ],
+            {
+               "research": {
+                  "feasibilty": "reverse e=mc2 to convert energy to mass",
+                  "brand": "OpenMind"
+               }
+            }
+         ]
+      },
+      "refInfo": {
+         "condition": "stable-good",
+         "weather": "stable and cloudy",
+         "expectedWeather": "rain",
+         "music": "Deep chills",
+         "music details": {
+            "lyrics": "Its all in the way and say my name",
+            "listenedOn": "24/02/2022",
+            "recomendedTags": [
+               "chills",
+               "programming music"
+            ]
+         }
+      }
+   }
+}
