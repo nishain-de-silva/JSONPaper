@@ -9,6 +9,7 @@ public class JSONEntity {
     
     private var jsonText: String = ""
     private var jsonData: UnsafeRawBufferPointer = UnsafeRawBufferPointer.init(start: nil, count: 0)
+    private var jsonDataMemoryHolder: [UInt8] = []
     private var arrayValues:[JSONEntity] = []
     private var objectEntries:[(key: String, value: JSONEntity)] = []
     private var contentType:String
@@ -31,6 +32,28 @@ public class JSONEntity {
             self = .init(rawValue: v)!
         }
     }
+
+    private struct Value {
+        var string: String
+        var bytes: UnsafeRawBufferPointer
+        var memoryHolder: [UInt8] = []
+
+        init(_ input: String) {
+            string = input
+            bytes = UnsafeRawBufferPointer(start: nil, count: 0)
+        }
+
+        init(_ data: [UInt8]) {
+            memoryHolder = data
+            bytes = memoryHolder.withUnsafeBytes({$0})
+            string = ""
+        }
+        
+        init(_ text: String, _ data: UnsafeRawBufferPointer) {
+            string = text
+            bytes = data
+        }
+    }
         
     public init(_ jsonString: String) {
         jsonText = jsonString
@@ -44,6 +67,7 @@ public class JSONEntity {
         jsonData = UnsafeRawBufferPointer(start: jsonText.withUTF8({$0}).baseAddress, count: jsonText.count)
     }
     
+    /// Provide buffer pointer to the JSON content bytes 
     public init(_ jsonBufferPointer: UnsafeRawBufferPointer) {
         jsonData = jsonBufferPointer
         switch(jsonData.first) {
@@ -87,13 +111,27 @@ public class JSONEntity {
         }
     }
 
-    
+    // ======= PRIVATE INTITIALIZERS =====
     private init(_ json: String, _ type: String) {
         jsonText = json
         contentType = type
         if contentType == "object" {
             jsonData = UnsafeRawBufferPointer(start: jsonText.withUTF8({$0}).baseAddress, count: jsonText.count)
         }
+    }
+
+    
+    private init(_ json: [UInt8], _ type: String) {
+        jsonDataMemoryHolder = json
+        jsonText = ""
+        contentType = type
+        jsonData = jsonDataMemoryHolder.withUnsafeBytes({$0})
+    }
+    
+    private init(_ json: UnsafeRawBufferPointer, _ type: String) {
+        jsonText = ""
+        contentType = type
+        jsonData = json
     }
     
     /// set token to represent intermediate paths.
@@ -112,8 +150,8 @@ public class JSONEntity {
         return self
     }
     
-    private func getField <T>(_ path: String?, _ fieldName: String, _ mapper: (String) -> T?, ignoreType:Bool = false) -> T? {
-        guard let (data, type) = path == nil ? (jsonText, contentType) : decodeData(path!) else { return nil; }
+    private func getField <T>(_ path: String?, _ fieldName: String, _ mapper: (Value) -> T?, ignoreType:Bool = false) -> T? {
+        guard let (data, type) = path == nil ? (Value(jsonText, jsonData), contentType) : decodeData(path!) else { return nil; }
         if !ignoreType && type != fieldName {
             if typeMismatchWarningCount != 3 {
                 print("[JSONStore] type constrained query expected \(fieldName) but \(type) type value was read instead therefore returned nil. This warning will not be shown after 3 times per instance")
@@ -126,12 +164,12 @@ public class JSONEntity {
     
     /// Get string value of the given addressed path.
     public func string(_ path:String? = nil) -> String? {
-        return getField(path, "string", { $0 })
+        return getField(path, "string", { $0.string })
     }
     
     /// Get number value of the given addressed path.
     public func number(_ path:String? = nil, ignoreType: Bool = false) -> Double? {
-        return getField(path, "number", { Double($0) }, ignoreType: ignoreType)
+        return getField(path, "number", { Double($0.string) }, ignoreType: ignoreType)
     }
     
     /// Check if the element of the given addressed path represent a null value.
@@ -146,24 +184,24 @@ public class JSONEntity {
     public func object(_ path:String? = nil, ignoreType: Bool = false) -> JSONEntity? {
         if path == nil { return self }
         return getField(path, "object", {
-            JSONEntity(ignoreType ? replaceEscapedQuotations($0) : $0, "object")
+            ignoreType ? JSONEntity(replaceEscapedQuotations($0.string), "object") : JSONEntity($0.memoryHolder, "object")
         }, ignoreType: ignoreType)
     }
     
     /// Get boolean value of the given addressed path
     public func bool(_ path: String? = nil, ignoreType: Bool = false) -> Bool? {
-        return getField(path, "boolean", { $0 == "true" }, ignoreType: ignoreType)
+        return getField(path, "boolean", { $0.string == "true" }, ignoreType: ignoreType)
     }
     
     /// Get collection of nodes addressed by the given path. Activate ignoreType to parse addressed string to json array .
     public func array(_ path:String? = nil, ignoreType: Bool = false) -> [JSONEntity]? {
         if ignoreType {
-            guard let arrayContent = getField(path, "string", { replaceEscapedQuotations($0) }, ignoreType: true) else { return nil }
+            guard let arrayContent = getField(path, "string", { replaceEscapedQuotations($0.string) }, ignoreType: true) else { return nil }
             return JSONEntity(arrayContent).array()
         }
         copyArrayData = true
         let data = decodeData(path == nil ? "-1" : "\(path!).-1")
-        if data?.value != "$COMPLETE_ARRAY" || data?.type != "code" {
+        if data?.value.string != "$COMPLETE_ARRAY" || data?.type != "code" {
             copyArrayData = false
             return nil
         }
@@ -179,8 +217,8 @@ public class JSONEntity {
     /// Get collection if key-value pair of the pointed object. The path must point to object type
     public func entries(_ path: String? = nil) -> [(key: String, value: JSONEntity)]? {
         copyObjectEntries = true
-        let data = decodeData(path == nil || path!.count == 0 ? "dummyAtr" : "\(path!).dummyAtr")
-        if data?.value != "$COMPLETE_OBJECT" || data?.type != "code" {
+        let data = decodeData(path == nil || path!.count == 0 ? "dummyAtr" : "\(path!)\(pathSpliter)dummyAtr")
+        if data?.value.string != "$COMPLETE_OBJECT" || data?.type != "code" {
             copyObjectEntries = false
             return nil
         }
@@ -188,33 +226,33 @@ public class JSONEntity {
         return objectEntries
     }
 
-    private func resolveValue(value: String, type: String, serialize: Bool = false) -> Any {
+    private func resolveValue(stringData: String, byteData: UnsafeRawBufferPointer, type: String, serialize: Bool = false) -> Any {
         switch(type) {
-            case "number": return Double(value)!
+            case "number": return Double(stringData)!
         case "object":
             if !serialize {
-                return JSONEntity(value, "object")
+                return JSONEntity(byteData, "object")
             }
             
             var objData: [String: Any] = [String: Any]()
-            JSONEntity(value, type).entries("")!.forEach({
-                key, nestedValue in objData[key] = resolveValue(value: nestedValue.jsonText, type: nestedValue.contentType, serialize: serialize)
+            JSONEntity(byteData, type).entries("")!.forEach({
+                key, nestedValue in objData[key] = resolveValue(stringData: nestedValue.jsonText, byteData: nestedValue.jsonData, type: nestedValue.contentType, serialize: serialize)
             })
             return objData
             
         case "array":
             if !serialize {
-                return JSONEntity(value, "array").array()!
+                return JSONEntity(byteData, "array").array()!
             }
          
-            return JSONEntity(value).array()!
+            return JSONEntity(byteData, "array").array()!
                 .map({ item in
-                    return resolveValue(value: item.jsonText, type: item.contentType, serialize: serialize)
+                    return resolveValue(stringData: item.jsonText,byteData: item.jsonData ,type: item.contentType, serialize: serialize)
                 }) as [Any]
             
-            case "boolean": return value == "true" ? true : false
-        case "null": return Constants.NULL
-            default: return value
+            case "boolean": return stringData == "true" ? true : false
+            case "null": return Constants.NULL
+            default: return stringData
         }
     }
     
@@ -222,8 +260,11 @@ public class JSONEntity {
     /// Similar to calling string(), array(), object() .etc but without knowing the type queried value
     /// - Returns: the value addressed by the path and its type is returned as a tuple
     public func value(_ path: String? = nil) -> (value: Any, type: JSONType)? {
-        guard let (value, type) = (path == nil ? (jsonText, contentType) : decodeData(path!)) else { return nil }
-        return (resolveValue(value: value, type: type), JSONType(type))
+        if path == nil {
+            return (resolveValue(stringData: jsonText, byteData: jsonData, type: contentType), JSONType(contentType))
+        }
+        guard let (value, type) = decodeData(path!) else { return nil }
+        return (resolveValue(stringData: value.string, byteData: value.bytes, type: type), JSONType(type))
     }
     
     /// get the type of value held by the content of this node
@@ -231,16 +272,25 @@ public class JSONEntity {
         return JSONType(contentType)
     }
     
-    /// dump the contents of this node as a string
-    public func dump(_ path: String? = nil) -> String? {
-        return path == nil ? jsonText : decodeData(path!)?.value
+    /// convert the selected element content to representable string
+    public func convertToString(_ path: String? = nil) -> String? {
+        if path == nil {
+            return jsonData.count == 0 ? jsonText : String(jsonData.map({Character(UnicodeScalar($0))}))
+        }
+        guard let result =  decodeData(path!)
+        else { return nil }
+        
+        return result.value.bytes.count == 0 ? result.value.string : 
+        String(result.value.bytes.map({
+                Character(UnicodeScalar($0))
+        }))   
     }
     
     /// Get the natural value of JSON element expressed associated swift type (except null represented in JSONStore.Constants.NULL).
     /// If array then collection is returned where subelement also recursively procesed till to their primitive values.
     /// If object then collection of key-value tupple is given. Like arrays value is also recursivelty proccessed
     public func export() -> Any {
-        return resolveValue(value: jsonText, type: contentType, serialize: true)
+        return resolveValue(stringData: jsonText, byteData: jsonData, type: contentType, serialize: true)
     }
     
     /// Read a json element without type constraints.
@@ -248,16 +298,18 @@ public class JSONEntity {
     /// - Returns: the value addressed by the path and its type is returned as a tuple
     public func export(_ path: String) -> Any? {
         guard let (value, type) = decodeData(path) else { return nil }
-        return resolveValue(value: value, type: type, serialize: true)
+        return resolveValue(stringData: value.string, byteData: value.bytes, type: type, serialize: true)
     }
     
     /// capture the node addresss by the given path.
     public func capture(_ path: String) -> JSONEntity? {
         guard let result = decodeData(path) else { return nil }
-        return JSONEntity(result.value, result.type)
+        return result.value.bytes.count == 0 ? 
+            JSONEntity(result.value.string, result.type) :
+            JSONEntity(result.value.memoryHolder, result.type)
     }
     
-    private func decodeData(_ inputPath:String) -> (value: String, type: String)? {
+    private func decodeData(_ inputPath:String) -> (value: Value, type: String)? {
         return decodeBytes(inputPath, arrayValues: &arrayValues, objectEntries: &objectEntries, copyArrayData: copyArrayData, copyObjectEntries: copyObjectEntries)
     }
     
@@ -269,7 +321,9 @@ public class JSONEntity {
         return output
     }
 
-    func decodeBytes(_ inputPath:String, arrayValues: inout [JSONEntity], objectEntries: inout [(key: String, value: JSONEntity)], copyArrayData: Bool, copyObjectEntries: Bool) -> (value: String, type: String)? {
+    private func decodeBytes(_ inputPath:String, arrayValues: inout [JSONEntity], 
+        objectEntries: inout [(key: String, value: JSONEntity)], copyArrayData: Bool, copyObjectEntries: Bool
+        ) -> (value: Value, type: String)? {
         if !(contentType == "object" || contentType == "array") {
             return nil
         }
@@ -283,6 +337,7 @@ public class JSONEntity {
         var startSearchValue = false
         var isGrabbingText = false
         var grabbedText = ""
+        var grabbedBytes: [UInt8] = []
         var grabbingKey = ""
         var isGrabbingNotation = false
         var isGrabbingKey = false
@@ -298,7 +353,11 @@ public class JSONEntity {
         
         arrayValues = []
         objectEntries = []
-        
+
+        if paths.count == 0 {
+            print("[JSONStore] given path cannot be a empty string. Please provide a valid path.")
+            return nil
+        }
         if paths.last == intermediateSymbol {
             print("[JSONStore] the path cannot be end with a intermediate representer - \(intermediateSymbol)")
             return nil
@@ -316,9 +375,11 @@ public class JSONEntity {
                             // start grabbing array/object array elements on isGrabbingArrayValues mode
                             if isGrabbingArrayValues {
                                 if notationBalance == processedPathIndex + additionalTransversals + 2 {
+                                    grabbedBytes = []
                                     grabbingDataType = char == 123 ? "object" : "array"
                                 }
-                                grabbedText.append(Character(UnicodeScalar(char)))
+                                grabbedBytes.append(char)
+                                // grabbedText.append(Character(UnicodeScalar(char)))
                             }
                             continue
                         }
@@ -328,14 +389,16 @@ public class JSONEntity {
                     }
                     // if the last value of last key is object or array then start copy it
                     if (processedPathIndex == paths.count || isGrabbingArrayValues) && !isGrabbingNotation {
-                        grabbedText = ""
+                        // grabbedText = ""
+                        grabbedBytes = []
                         isGrabbingNotation = true
                         grabbingDataType = char == 123 ? "object" : "array"
                     }
                     
                     // continue copying object/arrray inner characters...
                     if isGrabbingNotation {
-                        grabbedText.append(Character(UnicodeScalar(char)))
+                        grabbedBytes.append(char)
+                        //grabbedText.append(Character(UnicodeScalar(char)))
                         continue
                     }
                     
@@ -385,15 +448,18 @@ public class JSONEntity {
                         // when finished copy last primitive value on copyObjectEntries mode. Need to make sure the parent container notation is an object
                         if copyObjectEntries && char == 125 {
                             objectEntries.append((grabbingKey, JSONEntity(grabbedText, grabbingDataType)))
-                            return ("$COMPLETE_OBJECT", "code")
+                            return (Value("$COMPLETE_OBJECT"), "code")
                         } else if isGrabbingArrayValues {
                             // append the pending grabbing text
                             arrayValues.append(JSONEntity(trimSpace(grabbedText), grabbingDataType))
                         } else {
-                            return (trimSpace(grabbedText), grabbingDataType)
+                            return (Value(trimSpace(grabbedText)), grabbingDataType)
                         }
                     }
-                    if isGrabbingNotation { grabbedText.append(Character(UnicodeScalar(char))) }
+                    if isGrabbingNotation { 
+                        // grabbedText.append(Character(UnicodeScalar(char)))
+                        grabbedBytes.append(char)
+                    }
                     
                     // occur after all element in foccused array or object is finished searching...
                     if notationBalance == processedPathIndex + additionalTransversals {
@@ -410,7 +476,7 @@ public class JSONEntity {
                                 continue
                             }
                             if isGrabbingArrayValues {
-                                return ("$COMPLETE_ARRAY", "code")
+                                return (Value("$COMPLETE_ARRAY"), "code")
                             }
                             return nil
                         }
@@ -426,14 +492,14 @@ public class JSONEntity {
                                 isNavigatingUnknownPath = true
                                 continue
                             }
-                            if copyObjectEntries { return ("$COMPLETE_OBJECT", "code") }
+                            if copyObjectEntries { return (Value("$COMPLETE_OBJECT"), "code") }
                             return nil
                         }
                         
                         // copy json object/array data upon reading last path index
                         if processedPathIndex == paths.count {
-                            if !copyObjectEntries { return (grabbedText, grabbingDataType) }
-                            objectEntries.append((grabbingKey, JSONEntity(grabbedText, grabbingDataType)))
+                            if !copyObjectEntries { return (Value(grabbedBytes), grabbingDataType) }
+                            objectEntries.append((grabbingKey, JSONEntity(grabbedBytes, grabbingDataType)))
                             startSearchValue = false
                             isGrabbingNotation = false
                             processedPathIndex -= 1
@@ -443,7 +509,7 @@ public class JSONEntity {
                     if isGrabbingArrayValues {
                         // append after finishing copy single array/object element inside array during isGrabbingArrayValues mode
                         if isGrabbingNotation && notationBalance == (processedPathIndex + additionalTransversals + 1) {
-                            arrayValues.append(JSONEntity(grabbedText, grabbingDataType))
+                            arrayValues.append(JSONEntity(grabbedBytes, grabbingDataType))
                             isGrabbingNotation = false
                         }
                     }
@@ -455,7 +521,8 @@ public class JSONEntity {
                 if !escapeCharacter && char == 34 {
                     isInQuotes = !isInQuotes
                 }
-                grabbedText.append(Character(UnicodeScalar(char)))
+                grabbedBytes.append(char)
+                // grabbedText.append(Character(UnicodeScalar(char)))
             } else if startSearchValue {
                 if notationBalance == processedPathIndex + additionalTransversals || (isCountArray && (processedPathIndex + additionalTransversals + 1) == notationBalance) {
                     // ignore escaped double quotation characters inside string values...
@@ -481,7 +548,7 @@ public class JSONEntity {
                                     grabbedText = ""
                                     continue
                                 }
-                                return (grabbedText, "string")
+                                return (Value(grabbedText), "string")
                             }
                             // appending string elements to entries
                             // processedPathIndex is decrement to stop stimulation the overal stimulation is over
@@ -530,7 +597,7 @@ public class JSONEntity {
                                         grabbedText = ""
                                         continue
                                     }
-                                    return (trimSpace(grabbedText), grabbingDataType)
+                                    return (Value(trimSpace(grabbedText)), grabbingDataType)
                                 }
                             } else if !isCountArray {
                                 startSearchValue = false
