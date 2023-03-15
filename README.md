@@ -1,3 +1,5 @@
+<img src="logo.png" alt="drawing" style="width:100px;"/>
+
 # JSONStore (v2.5) :rocket:
 
 Swift is a type constrained lanuage right ? One way of parsing JSON is to parse JSON string to a known `Codable` JSON structure. In Swift 3 you can use `JSONSerialization` but still you have to chain deserialziation call and it would be mess when you have to check existence of attributes or array values before reading or when handling any complex read queries. Also there are times when expected JSON structure also can have dynamic on certain scenario and would be messy to check value exsistence all the time. JSONStore help you to parse JSON in any free form and extract value without constraining into a fixed type. This is pure zero dependency `Swift` package with `Read Only Until Value Dicovered` mechanism in a single read cycle and performance efficient.

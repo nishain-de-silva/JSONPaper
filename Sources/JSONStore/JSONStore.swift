@@ -370,7 +370,6 @@ public class JSONEntity {
         
         var elementIndexCursor = -1 // the count variable when iterating array
         var pathArrayIndex = -1 // the array index of given on path
-        var notationBalanceOnArray = -1
         var notationBalance = 0
         var grabbingDataType: String = "string"
         var possibleType: String = ""
@@ -427,9 +426,6 @@ public class JSONEntity {
                         continue
                     }
                     
-                    if char == 91 {
-                        notationBalanceOnArray = notationBalance
-                    }
                     // intiate elements counting inside array on reaching open bracket...
                     if char == 91 && !isCountArray && ((processedPathIndex + additionalTransversals + 1) == notationBalance || isNavigatingUnknownPath) {
                         let parsedIndex = Int(paths[processedPathIndex])
@@ -487,10 +483,6 @@ public class JSONEntity {
                     if isGrabbingNotation { 
                         // grabbedText.append(Character(UnicodeScalar(char)))
                         grabbedBytes.append(char)
-                    }
-                    
-                    if char == 93 {
-                        notationBalanceOnArray = -1
                     }
                     
                     // occur after all element in foccused array or object is finished searching...
@@ -641,12 +633,6 @@ public class JSONEntity {
                     }
                 } else if char == 34 && !escapeCharacter {
                     isInQuotes = !isInQuotes
-                    if !isInQuotes {
-                        startSearchValue = false
-                    }
-                } else if !isInQuotes && char == 44
-                            && notationBalance != notationBalanceOnArray {
-                    startSearchValue = false
                 }
                 
                 // ========= SECTION RESPONSIBLE HANDLING OBJECT KEY
@@ -657,10 +643,10 @@ public class JSONEntity {
                     if (processedPathIndex + 1 + additionalTransversals) == notationBalance || isNavigatingUnknownPath {
                         isGrabbingKey = !isGrabbingKey
                         if !isGrabbingKey {
-                            startSearchValue = true
                             // if found start searching for object value for object key
                             if (copyObjectEntries && (processedPathIndex + 1) == paths.count) || grabbingKey == paths[processedPathIndex] {
                                 processedPathIndex += 1
+                                startSearchValue = true
                                 if isNavigatingUnknownPath {
                                     isNavigatingUnknownPath = false
                                     additionalTransversals = notationBalance - processedPathIndex
