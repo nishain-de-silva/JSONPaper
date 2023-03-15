@@ -42,14 +42,14 @@ final class JSONStoreTest: XCTestCase {
                 case "null":
                     expect(instance.isNull(path) == (expectedValue == "true"), index)
                 case "object":
-                    print(instance.object(path)?.export() ?? "expected object is null")
+                    print(instance.object(path)?.parse() ?? "expected object is null")
                 case "array":
-                    print(instance.object(path)?.export() ?? "expected array is null")
+                    print(instance.object(path)?.parse() ?? "expected array is null")
                 default:
                     if expectedValue != nil {
-                        expect(instance.convertToString(path) == expectedValue, index)
+                        expect(instance.stringify(path) == expectedValue, index)
                     } else {
-                        print("command \(index + 1) results - \(instance.convertToString(path) ?? "nothing")")
+                        print("command \(index + 1) results - \(instance.stringify(path) ?? "nothing")")
                     }
             }
         }
@@ -71,7 +71,7 @@ final class JSONStoreTest: XCTestCase {
 //                "???.moredetails.temperature as number = 87",
 //                "???.1.???.place as string = Galle",
 //            ], instance: entity)
-            print("results", (entity.object("???.moredetails")?.value()?.value as! JSONEntity).export() ?? "nothing")
+            print("results", entity.string("root.???.speciesType") ?? "nothing")
 //            print(id ?? "nothing")
             print("elapsed time - ", Date().timeIntervalSince(start))
         } catch {

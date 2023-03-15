@@ -9,7 +9,7 @@ You can use `Swift Package Manager` to Install `JSONStore` from this repository 
 ## Usage
 
 > **Warning**
-> The library does `not` handle incorrect `JSON` format. Please make sure to sanatize input string in such cases or otherwise would give you incorrect or unexpected value(s). JSON content must be decodable on `UTF` format (Best tested on `UTF-8` format).
+> The library does `not` handle incorrect `JSON` format. Please make sure to sanatize input string in such cases or otherwise would give you incorrect or unexpected any(s). JSON content must be decodable on `UTF` format (Best tested on `UTF-8` format).
 ## Intializing
 
 There are handful of ways to initialize JSONStore. You can initialize by `string` or from `Data` instance. Initializing from `Data` is bit trickier as JSONStore does not use `Foundation` so it cannot resolve `Data` type. Hence you have to provide `UnsafeRawBufferPointer` instance instead. You can also provide function which require map callback (eg: `Data.withUnsafeBytes` as constructor parameter _(see [withUnsafeBytes](https://developer.apple.com/documentation/swift/array/withunsafebytes(_:)) to learn about such callbacks)_.
@@ -122,10 +122,10 @@ Few rules,
 
 ## Handling unknown types
 
-So how do you get value of unknown types ? You can use `value()` method. It gives the natural value of an attribute as a `tuple` containing (value: `Any`, type: `JSONType`).
+So how do you get value of unknown types ? You can use `any()` method. It gives the natural value of an attribute as a `tuple` containing (value: `Any`, type: `JSONType`).
 
 ```swift
-let (value, type) = jsonRef.value("somePath")
+let (value, type) = jsonRef.any("somePath")
 
 if type == .string {
     // you can safely downcast to string
@@ -148,25 +148,25 @@ you could additionally use `type()` to get data type of current json `reference`
 
 ## Serializing Data
 
-Sometimes you may need to write the results on `serializable` destination such as in-device cache where you have to omit usage of class instances and unwarp its actual value. You can use `export()` for this, `array` and `object` will be converted to `array` and `dictionary` recursively and other primitive types will be converted in their `natural` values. 
+Sometimes you may need to write the results on `serializable` destination such as in-device cache where you have to omit usage of class instances and unwarp its actual value. You can use `parse()` for this, `array` and `object` will be converted to `array` and `dictionary` recursively and other primitive types will be converted in their `natural` values. 
 
 _Remember `null` is represented  by `JSONStore.Constants.NULL`. This is to avoid optional wrapping._
 
-> Be aware that `export` function procress json content recursively processe on each nested individual `array` and `object` and therefore can cost performance on heavily nested json content.
+> Be aware that `parse` function procress json content recursively processe on each nested individual `array` and `object` and therefore can cost performance on heavily nested json content.
 
 ## Capturing references
 
-`capture()` is used to capture the reference of the given path or clone current instance. You can basically query values in 2 ways:
+`take()` is used to capture the reference of the given path or clone current instance. You can basically query values in 2 ways:
 
 ```swift
 let value = reference.string(attributePath)!
 // or
-let value = reference.capture(attributePath)?.string()
+let value = reference.take(attributePath)?.string()
 // both gives same result
 ```
 ## Dumping Data
 
-To dump data at a particular node for `debugging` pourpose you can always use `.dump(attributePath)` as it always give the value in `string` format unless attribute was not found which would give `nil`.
+To dump data at a particular node for `debugging` pourpose you can always use `.stringify(attributePath)` as it always give the value in `string` format unless attribute was not found which would give `nil`.
 
 ## Author and Main Contributor
 @Nishain De Silva
