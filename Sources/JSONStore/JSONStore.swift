@@ -354,8 +354,8 @@ public class JSONEntity {
         var paths = inputPath.split(separator: pathSpliter)
         var processedPathIndex = 0
         var isNavigatingUnknownPath = false
-        var additionalTransversals = 0
-        var tranversalHistory: [(processedPathIndex: Int, additionalTransversals: Int)] = []
+        var advancedOffset = 0
+        var tranversalHistory: [(processedPathIndex: Int, advancedOffset: Int)] = []
 
         var isInQuotes = false
         var startSearchValue = false
@@ -363,6 +363,7 @@ public class JSONEntity {
         var grabbedText = ""
         var grabbedBytes: [UInt8] = []
         var grabbingKey = ""
+        var needProccessKey = false
         var isGrabbingNotation = false
         var isGrabbingKey = false
         var isCountArray = false
@@ -398,7 +399,7 @@ public class JSONEntity {
 
                             // start grabbing array/object array elements on isGrabbingArrayValues mode
                             if isGrabbingArrayValues {
-                                if notationBalance == processedPathIndex + additionalTransversals + 2 {
+                                if notationBalance == advancedOffset + 2 {
                                     grabbedBytes = []
                                     grabbingDataType = char == 123 ? "object" : "array"
                                 }
@@ -409,6 +410,7 @@ public class JSONEntity {
                         }
                         // if element found for matched index stop array searching ..
                         processedPathIndex += 1
+                        advancedOffset += 1
                         isCountArray = false
                     }
                     // if the last value of last key is object or array then start copy it
@@ -427,21 +429,21 @@ public class JSONEntity {
                     }
                     
                     // intiate elements counting inside array on reaching open bracket...
-                    if char == 91 && !isCountArray && ((processedPathIndex + additionalTransversals + 1) == notationBalance || isNavigatingUnknownPath) {
+                    if char == 91 && !isCountArray && ((advancedOffset + 1) == notationBalance || isNavigatingUnknownPath) {
                         let parsedIndex = Int(paths[processedPathIndex])
                         // occur when trying to access element of array with non-number index
                         if parsedIndex == nil {
                            if paths[processedPathIndex] == intermediateSymbol {
                                 paths.remove(at: processedPathIndex)
                                 isNavigatingUnknownPath = true
-                                tranversalHistory.append((processedPathIndex, additionalTransversals))
+                                tranversalHistory.append((processedPathIndex, advancedOffset))
                                 continue
                            } else if isNavigatingUnknownPath { continue }
                             return nil
                         }
                         if isNavigatingUnknownPath {
                             isNavigatingUnknownPath = false
-                            additionalTransversals = notationBalance - processedPathIndex - 1
+                            advancedOffset = notationBalance - 1
                         }
                         isCountArray = true
                         pathArrayIndex = parsedIndex!
@@ -457,7 +459,7 @@ public class JSONEntity {
                         startSearchValue = false
                         if paths[processedPathIndex] == intermediateSymbol {
                             isNavigatingUnknownPath = true
-                            tranversalHistory.append((processedPathIndex, additionalTransversals))
+                            tranversalHistory.append((processedPathIndex, advancedOffset))
                             paths.remove(at: processedPathIndex)
                         }
                     }
@@ -486,7 +488,7 @@ public class JSONEntity {
                     }
                     
                     // occur after all element in foccused array or object is finished searching...
-                    if notationBalance == processedPathIndex + additionalTransversals {
+                    if notationBalance == advancedOffset {
                         if isCountArray && char == 93 {
                             // occur when when not matching element is found for given array index and array finished iterating...
                             if tranversalHistory.count != 0 && !(isGrabbingArrayValues && (processedPathIndex + 1) == paths.count){
@@ -494,7 +496,7 @@ public class JSONEntity {
                                     tranversalHistory.removeLast()
                                     paths.insert(intermediateSymbol, at: processedPathIndex)
                                 }
-                                (processedPathIndex, additionalTransversals) = tranversalHistory[tranversalHistory.count - 1]
+                                (processedPathIndex, advancedOffset) = tranversalHistory[tranversalHistory.count - 1]
                                 isNavigatingUnknownPath = true
                                 isCountArray = false
                                 continue
@@ -512,7 +514,7 @@ public class JSONEntity {
                                     tranversalHistory.removeLast()
                                     paths.insert(intermediateSymbol, at: processedPathIndex)
                                 }
-                                (processedPathIndex, additionalTransversals) = tranversalHistory[tranversalHistory.count - 1]
+                                (processedPathIndex, advancedOffset) = tranversalHistory[tranversalHistory.count - 1]
                                 isNavigatingUnknownPath = true
                                 continue
                             }
@@ -527,12 +529,13 @@ public class JSONEntity {
                             startSearchValue = false
                             isGrabbingNotation = false
                             processedPathIndex -= 1
+                            advancedOffset -= 1
                         }
                     }
                     
                     if isGrabbingArrayValues {
                         // append after finishing copy single array/object element inside array during isGrabbingArrayValues mode
-                        if isGrabbingNotation && notationBalance == (processedPathIndex + additionalTransversals + 1) {
+                        if isGrabbingNotation && notationBalance == (advancedOffset + 1) {
                             arrayValues.append(JSONEntity(grabbedBytes, grabbingDataType))
                             isGrabbingNotation = false
                         }
@@ -549,7 +552,7 @@ public class JSONEntity {
                 grabbedBytes.append(char)
                 // grabbedText.append(Character(UnicodeScalar(char)))
             } else if startSearchValue {
-                if notationBalance == processedPathIndex + additionalTransversals || (isCountArray && (processedPathIndex + additionalTransversals + 1) == notationBalance) {
+                if notationBalance == advancedOffset || (isCountArray && (advancedOffset + 1) == notationBalance) {
                     // ====== HANDLING GRABBING STRINGS =========
                     // ignore escaped double quotation characters inside string values...
                     if !escapeCharacter && char == 34 {
@@ -581,6 +584,7 @@ public class JSONEntity {
                             objectEntries.append((grabbingKey, JSONEntity(grabbedText, "string")))
                             startSearchValue = false
                             processedPathIndex -= 1
+                            advancedOffset -= 1
                         } else {
                             grabbingDataType = "string"
                             grabbedText = ""
@@ -614,6 +618,7 @@ public class JSONEntity {
                                     startSearchValue = false
                                     isGrabbingText = false
                                     processedPathIndex -= 1
+                                    advancedOffset -= 1
                                 } else  {
                                     // the below block need to require to copy terminate primitive values and append on meeting ',' terminator...
                                     if isGrabbingArrayValues {
@@ -624,8 +629,6 @@ public class JSONEntity {
                                     }
                                     return (Value(trimSpace(grabbedText)), grabbingDataType)
                                 }
-                            } else if !isCountArray {
-                                startSearchValue = false
                             }
                         } else if isGrabbingText {
                             grabbedText.append(Character(UnicodeScalar(char)))
@@ -640,24 +643,28 @@ public class JSONEntity {
                 if char == 34 && !escapeCharacter {
                     isInQuotes = !isInQuotes
                     // grabbing the matching correct object key as given in path
-                    if (processedPathIndex + 1 + additionalTransversals) == notationBalance || isNavigatingUnknownPath {
+                    if (advancedOffset + 1) == notationBalance || isNavigatingUnknownPath {
                         isGrabbingKey = !isGrabbingKey
-                        if !isGrabbingKey {
-                            // if found start searching for object value for object key
-                            if (copyObjectEntries && (processedPathIndex + 1) == paths.count) || grabbingKey == paths[processedPathIndex] {
-                                processedPathIndex += 1
-                                startSearchValue = true
-                                if isNavigatingUnknownPath {
-                                    isNavigatingUnknownPath = false
-                                    additionalTransversals = notationBalance - processedPathIndex
-                                }
-                            }
-                        } else {
+                        if isGrabbingKey {
                             grabbingKey = ""
+                        } else {
+                            needProccessKey = true
                         }
                     }
                 } else if isGrabbingKey {
                     grabbingKey.append(Character(UnicodeScalar(char)))
+                } else if needProccessKey && !isInQuotes && char == 58 {
+                    needProccessKey = false
+                    // if found start searching for object value for object key
+                    if (copyObjectEntries && (processedPathIndex + 1) == paths.count) || grabbingKey == paths[processedPathIndex] {
+                        processedPathIndex += 1
+                        advancedOffset += 1
+                        startSearchValue = true
+                        if isNavigatingUnknownPath {
+                            isNavigatingUnknownPath = false
+                            advancedOffset = notationBalance
+                        }
+                    }
                 }
             }
             // handling escape characters at the end ...
