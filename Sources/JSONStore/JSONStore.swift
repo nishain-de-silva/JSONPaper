@@ -1,5 +1,5 @@
 public enum Constants {
-    /// .NULL used to represent null JSON values on export() and value()
+    /// .NULL used to represent null JSON values on parse() and value()
     case NULL
 }
 
@@ -608,6 +608,7 @@ public class JSONEntity {
                             grabbedText.append(Character(UnicodeScalar(char)))
                             isGrabbingText = true
                             continue
+                            // handling comma notation in primitive values
                         } else if !isInQuotes && char == 44 {
                             if isCountArray {
                                 elementIndexCursor += 1
