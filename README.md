@@ -164,7 +164,7 @@ you could additionally use `type()` to get the data type of the current JSON `re
 
 ## Serializing Data
 
-Sometimes you may need to write the results on a `serializable` destination such as an in-device cache where you have to omit the usage of class instances and unwarp its actual value. You can use `parse()` for this, `array` and `object` will be converted to `array` and `dictionary` recursively until reaching primitive values of boolean, numbers, and null.
+Sometimes you may need to write the results on a `serializable` destination such as an in-device cache where you have to omit the usage of class instances and unwarp its actual value. You can use `unWrap()` for this, `array` and `object` will be converted to `array` and `dictionary` recursively until reaching primitive values of boolean, numbers, and null.
 
 _Remember `null` is represented by `JSONStore.Constants.NULL`. This is to avoid optional wrapping._
 
@@ -187,4 +187,4 @@ To visually view data at a particular node for `debugging` purposes you can alwa
 ## Author and Main Contributor
 @Nishain De Silva
 
-`Thoughts` -   _**"** I recently found out it is difficult to parse `JSON` on type-constrained language unlike in `JavaScript` so I ended up inventing a library for my purpose! So I thought maybe others face the same problem and why not make others also have a `taste` of what I created and keep on adding more features to make JSON reading with less hassle**"**_ :sunglasses:
+`Thoughts` -   _**"** I recently found out it is difficult to parse `JSON` on type-constrained language unlike in `JavaScript` so I ended up inventing a library for my purpose! So I thought maybe others face the same problem and why not make others also have a `taste` of what I created and keep on adding more features to make JSON reading with less hassle.**"**_ :sunglasses:

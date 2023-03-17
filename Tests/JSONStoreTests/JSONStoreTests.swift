@@ -30,7 +30,7 @@ final class JSONStoreTest: XCTestCase {
             let jsonData = try Data(contentsOf: URL(fileURLWithPath: path!))
             let start = Date()
             let entity = JSONEntity(jsonData.withUnsafeBytes)
-            print("results", entity.array("root.creditaInfo.???.0")?.map({$0.parse()}) ?? "nothing")
+            print("results", entity.array("root.creditaInfo.???.0")?.map({$0.unWrap()}) ?? "nothing")
 //            print(id ?? "nothing")
             print("elapsed time - ", Date().timeIntervalSince(start))
         } catch {

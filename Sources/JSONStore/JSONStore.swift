@@ -26,7 +26,6 @@ public class JSONEntity {
         case array = "array"
         case number = "number"
         case null = "null"
-        case unclassified = "notInit"
         
         init(_ v: String) {
             self = .init(rawValue: v)!
@@ -82,7 +81,7 @@ public class JSONEntity {
     public init(_ provider:  ((UnsafeRawBufferPointer?) throws -> UnsafeRawBufferPointer?) throws -> UnsafeRawBufferPointer?) {
         guard let buffer = try? provider({$0}) else {
             print(JSONEntity.INVALID_BUFFER_INITIALIZATION)
-            contentType = "notInit"
+            contentType = "string"
             return
         }
         jsonData = buffer
@@ -98,7 +97,7 @@ public class JSONEntity {
     public init(_ provider:  ((UnsafeRawBufferPointer?)  -> UnsafeRawBufferPointer?) -> UnsafeRawBufferPointer?) {
         guard let buffer = provider({$0}) else {
             print(JSONEntity.INVALID_BUFFER_INITIALIZATION)
-            contentType = "notInit"
+            contentType = "string"
             return
         }
         jsonData = buffer
@@ -274,17 +273,8 @@ public class JSONEntity {
     /// Read a json element without type constraints.
     /// Similar to calling string(), array(), object() .etc but without knowing the type queried value
     /// - Returns: the value addressed by the path and its type is returned as a tuple
-    public func any(_ path: String? = nil) -> (value: Any, type: JSONType)? {
-        if path == nil {
-            if contentType == "object" {
-                return (self, JSONType("object"))
-            }
-            if contentType == "array" {
-                return (array()!, JSONType("array"))
-            }
-            return (resolveValue(jsonText, jsonData, contentType), JSONType(contentType))
-        }
-        guard let (value, type) = decodeData(path!) else { return nil }
+    public func any(_ path: String) -> (value: Any, type: JSONType)? {
+        guard let (value, type) = decodeData(path) else { return nil }
         if type == "object" {
             return (JSONEntity(value.memoryHolder, "object"), JSONType("object"))
         }
@@ -313,14 +303,20 @@ public class JSONEntity {
     /// Get the natural value of JSON element expressed associated swift type (except null represented in JSONStore.Constants.NULL).
     /// If array then collection is returned where subelement also recursively procesed till to their primitive values.
     /// If object then collection of key-value tupple is given. Like arrays value is also recursivelty proccessed
-    public func parse() -> Any {
+    public func unWrap() -> Any {
         return resolveValue(jsonText, jsonData, contentType, serialize: true)
     }
     
-    /// Read a json element without type constraints.
-    /// Similar to calling string(), array(), object() .etc but without knowing the type queried value
-    /// - Returns: the value addressed by the path and its type is returned as a tuple
-    public func parse(_ path: String) -> Any? {
+    /// Get natural value of an element for given path with type of data. Similar to unWrap(path:)
+    public func unWrapWithType(_ path: String) -> (value: Any,type: JSONType)? {
+        guard let (value, type) = decodeData(path) else { return nil }
+        return (resolveValue(value.string, value.bytes, type, serialize: true), JSONType(type))
+    }
+    
+    /// Get natural value of the given path where object are represented as dictionary, null
+    /// as `JSONStore.Constants.NULL` other types to their respective forms. Each sub elements
+    ///  recurively shown until to their singular primitive values.
+    public func unWrap(_ path: String) -> Any? {
         guard let (value, type) = decodeData(path) else { return nil }
         return resolveValue(value.string, value.bytes, type, serialize: true)
     }
@@ -592,44 +588,47 @@ public class JSONEntity {
                         // used to copy values true, false, null and number
                     } else {
                         // ========== HANDLING GRABING NUMBERS, BOOLEANS AND NULL
-                        possibleType = ""
                         
-                        if (char >= 48 && char <= 57) || char == 45 { possibleType = "number" }
-                        else if char == 116 || char == 102 { possibleType = "boolean" }
-                        else if char == 110 { possibleType = "null" }
                         
-                        if !isInQuotes && !isGrabbingText && possibleType != "" {
-                            if !isGrabbingArrayValues && (processedPathIndex + (isCountArray ? 1 : 0)) != paths.count {
+                        if !isInQuotes && !isGrabbingText {
+                            possibleType = ""
+                            
+                            if (char >= 48 && char <= 57) || char == 45 { possibleType = "number" }
+                            else if char == 116 || char == 102 { possibleType = "boolean" }
+                            else if char == 110 { possibleType = "null" }
+                            if possibleType != "" {
+                                if !isGrabbingArrayValues && (processedPathIndex + (isCountArray ? 1 : 0)) != paths.count {
+                                    continue
+                                }
+                                grabbingDataType = possibleType
+                                if isCountArray && !isGrabbingArrayValues && elementIndexCursor != pathArrayIndex { continue }
+                                grabbedText = ""
+                                grabbedText.append(Character(UnicodeScalar(char)))
+                                isGrabbingText = true
                                 continue
+                            } else if char == 44 && isCountArray {
+                                elementIndexCursor += 1
                             }
-                            grabbingDataType = possibleType
-                            if isCountArray && !isGrabbingArrayValues && elementIndexCursor != pathArrayIndex { continue }
-                            grabbedText = ""
-                            grabbedText.append(Character(UnicodeScalar(char)))
-                            isGrabbingText = true
-                            continue
                             // handling comma notation in primitive values
                         } else if !isInQuotes && char == 44 {
                             if isCountArray {
                                 elementIndexCursor += 1
                             }
-                            if isGrabbingText {
-                                if copyObjectEntries {
-                                    objectEntries.append((grabbingKey, JSONEntity(trimSpace(grabbedText), grabbingDataType)))
-                                    startSearchValue = false
+                            if copyObjectEntries {
+                                objectEntries.append((grabbingKey, JSONEntity(trimSpace(grabbedText), grabbingDataType)))
+                                startSearchValue = false
+                                isGrabbingText = false
+                                processedPathIndex -= 1
+                                advancedOffset -= 1
+                            } else  {
+                                // the below block need to require to copy terminate primitive values and append on meeting ',' terminator...
+                                if isGrabbingArrayValues {
+                                    arrayValues.append(JSONEntity(trimSpace(grabbedText), grabbingDataType))
                                     isGrabbingText = false
-                                    processedPathIndex -= 1
-                                    advancedOffset -= 1
-                                } else  {
-                                    // the below block need to require to copy terminate primitive values and append on meeting ',' terminator...
-                                    if isGrabbingArrayValues {
-                                        arrayValues.append(JSONEntity(trimSpace(grabbedText), grabbingDataType))
-                                        isGrabbingText = false
-                                        grabbedText = ""
-                                        continue
-                                    }
-                                    return (Value(trimSpace(grabbedText)), grabbingDataType)
+                                    grabbedText = ""
+                                    continue
                                 }
+                                return (Value(trimSpace(grabbedText)), grabbingDataType)
                             }
                         } else if isGrabbingText {
                             grabbedText.append(Character(UnicodeScalar(char)))
@@ -654,7 +653,7 @@ public class JSONEntity {
                     }
                 } else if isGrabbingKey {
                     grabbingKey.append(Character(UnicodeScalar(char)))
-                } else if needProccessKey && !isInQuotes && char == 58 {
+                } else if needProccessKey && char == 58 {
                     needProccessKey = false
                     // if found start searching for object value for object key
                     if (copyObjectEntries && (processedPathIndex + 1) == paths.count) || grabbingKey == paths[processedPathIndex] {
