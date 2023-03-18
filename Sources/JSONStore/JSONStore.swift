@@ -3,6 +3,19 @@ public enum Constants {
     case NULL
 }
 
+public enum JSONType: String {
+    case string = "string"
+    case boolean = "boolean"
+    case object = "object"
+    case array = "array"
+    case number = "number"
+    case null = "null"
+    
+    init(_ v: String) {
+        self = .init(rawValue: v)!
+    }
+}
+
 public class JSONEntity {
     private static let INVALID_START_CHARACTER_ERROR = "[JSONStore] the first character of given json content is neither starts with '{' or '['. Make sure the given content is valid JSON"
     private static let INVALID_BUFFER_INITIALIZATION = "[JSONStore] instance has not properly initialized. Problem had occured when assigning input data buffer which occur when the provider callback given on .init(provider:) gives nil or when exception thrown within provider callback itself. Check the result given by by provider callback to resolve the issue."
@@ -10,50 +23,74 @@ public class JSONEntity {
     private var jsonText: String = ""
     private var jsonData: UnsafeRawBufferPointer = UnsafeRawBufferPointer.init(start: nil, count: 0)
     private var jsonDataMemoryHolder: [UInt8] = []
-    private var arrayValues:[JSONEntity] = []
-    private var objectEntries:[(key: String, value: JSONEntity)] = []
     private var contentType:String
     private var copyArrayData:Bool = false
     private var copyObjectEntries:Bool = false
+    private var extractInnerContent = false
     private var intermediateSymbol: String.SubSequence = "???"
     private var pathSpliter: Character = "."
     private var typeMismatchWarningCount = 0
-    
-    public enum JSONType: String {
-        case string = "string"
-        case boolean = "boolean"
-        case object = "object"
-        case array = "array"
-        case number = "number"
-        case null = "null"
-        
-        init(_ v: String) {
-            self = .init(rawValue: v)!
-        }
-    }
 
-    private struct Value {
+    private struct ValueStore {
         var string: String
         var bytes: UnsafeRawBufferPointer
         var memoryHolder: [UInt8] = []
+        var entries: [(key: String, value: JSONEntity)]
+        var array: [JSONEntity]
+        var tree: any Collection
 
         init(_ input: String) {
             string = input
             bytes = UnsafeRawBufferPointer(start: nil, count: 0)
+            entries = []
+            array = []
+            tree = []
         }
 
         init(_ data: [UInt8]) {
             memoryHolder = data
             bytes = memoryHolder.withUnsafeBytes({$0})
             string = ""
+            entries = []
+            array = []
+            tree = []
+
         }
         
         init(_ text: String, _ data: UnsafeRawBufferPointer) {
             string = text
             bytes = data
+            entries = []
+            array = []
+            tree = []
+        }
+        
+        init(entriesData: [(String, JSONEntity)]) {
+            string = ""
+            bytes = UnsafeRawBufferPointer(start: nil, count: 0)
+            entries = entriesData
+            array = []
+            tree = []
+        }
+        
+        init(arrayData: [JSONEntity]) {
+            string = ""
+            bytes = UnsafeRawBufferPointer(start: nil, count: 0)
+            entries = []
+            array = arrayData
+            tree = []
+        }
+
+        init(decodedData: any Collection) {
+            string = ""
+            bytes = UnsafeRawBufferPointer(start: nil, count: 0)
+            entries = []
+            array = []
+            tree = decodedData
         }
     }
-        
+    
+    /// Provide UTF string to read JSON content.
     public init(_ jsonString: String) {
         jsonText = jsonString
         switch (jsonText.first) {
@@ -66,7 +103,7 @@ public class JSONEntity {
         jsonData = UnsafeRawBufferPointer(start: jsonText.withUTF8({$0}).baseAddress, count: jsonText.count)
     }
     
-    /// Provide buffer pointer to the JSON content bytes 
+    /// Provide buffer pointer to the JSON content bytes.
     public init(_ jsonBufferPointer: UnsafeRawBufferPointer) {
         jsonData = jsonBufferPointer
         switch(jsonData.first) {
@@ -78,6 +115,7 @@ public class JSONEntity {
         }
     }
     
+    /// Provide mirror callback to recieve UnsafeRawBufferPointer instance.
     public init(_ provider:  ((UnsafeRawBufferPointer?) throws -> UnsafeRawBufferPointer?) throws -> UnsafeRawBufferPointer?) {
         guard let buffer = try? provider({$0}) else {
             print(JSONEntity.INVALID_BUFFER_INITIALIZATION)
@@ -94,6 +132,7 @@ public class JSONEntity {
         }
     }
 
+    /// Provide mirror callback to recieve UnsafeRawBufferPointer instance.
     public init(_ provider:  ((UnsafeRawBufferPointer?)  -> UnsafeRawBufferPointer?) -> UnsafeRawBufferPointer?) {
         guard let buffer = provider({$0}) else {
             print(JSONEntity.INVALID_BUFFER_INITIALIZATION)
@@ -133,9 +172,8 @@ public class JSONEntity {
         jsonData = json
     }
     
-    /// set token to represent intermediate paths.
-    /// 
-    /// Intermediate token capture one or more dynamic intermediate paths. Default token is ???
+    /// Set token to represent intermediate paths.
+    /// Intermediate token capture zero or more dynamic intermediate paths. Default token is ???.
     public func setIntermediateRepresentor (_ representer: String) -> JSONEntity {
         if Int(representer) != nil {
             print("[JSONStore] intermediate representer strictly cannot be a number!")
@@ -145,16 +183,17 @@ public class JSONEntity {
         return self
     }
 
-    /// set character to path segmenent given in string. Default is (.) dot notation.
+    /// Set the character to split the input path to attribute name/index segments.
+    /// Default split character is (.) dot notation.
     /// You can use this in case if key attribute also have dot notation.
-    /// It is best if the split character is a speacial character
+    /// It is recommended the split character to be a speacial character.
     public func setSpliter(_ splitRepresenter: Character) -> JSONEntity {
         pathSpliter = splitRepresenter
         return self
     }
     
-    private func getField <T>(_ path: String?, _ fieldName: String, _ mapper: (Value) -> T?, ignoreType:Bool = false) -> T? {
-        guard let (data, type) = path == nil ? (Value(jsonText, jsonData), contentType) : decodeData(path!) else { return nil; }
+    private func getField <T>(_ path: String?, _ fieldName: String, _ mapper: (ValueStore) -> T?, ignoreType:Bool = false) -> T? {
+        guard let (data, type) = path == nil ? (ValueStore(jsonText, jsonData), contentType) : decodeData(path!) else { return nil; }
         if !ignoreType && type != fieldName {
             if typeMismatchWarningCount != 3 {
                 print("[JSONStore] type constrained query expected \(fieldName) but \(type) type value was read instead therefore returned nil. This warning will not be shown after 3 times per instance")
@@ -165,17 +204,18 @@ public class JSONEntity {
         return mapper(data)
     }
     
-    /// Get string value of the given addressed path.
+    /// Get string value in the given path.
     public func string(_ path:String? = nil) -> String? {
         return getField(path, "string", { $0.string })
     }
     
-    /// Get number value of the given addressed path.
+    /// Get number value in the given path. Note that double instance is given even if
+    /// number is a whole integer type number.
     public func number(_ path:String? = nil, ignoreType: Bool = false) -> Double? {
         return getField(path, "number", { Double($0.string) }, ignoreType: ignoreType)
     }
     
-    /// Check if the element of the given addressed path represent a null value.
+    /// Check if the element in the given addressed path represent a null value.
     public func isNull(_ path:String? = nil) -> Bool? {
         guard let type = path == nil ? contentType: decodeData(path!)?.type else {
             return nil
@@ -183,7 +223,7 @@ public class JSONEntity {
         return type == "null"
     }
     
-    /// Get object value as a node of the given addressed path. Activate ignoreType to parse addressed string to json object.
+    /// Get object in the given path. Activate ignoreType to parse string as json object.
     public func object(_ path:String? = nil, ignoreType: Bool = false) -> JSONEntity? {
         if path == nil { return self }
         return getField(path, "object", {
@@ -191,12 +231,12 @@ public class JSONEntity {
         }, ignoreType: ignoreType)
     }
     
-    /// Get boolean value of the given addressed path
+    /// Get boolean value in the given path.
     public func bool(_ path: String? = nil, ignoreType: Bool = false) -> Bool? {
         return getField(path, "boolean", { $0.string == "true" }, ignoreType: ignoreType)
     }
     
-    /// Get collection of nodes addressed by the given path. Activate ignoreType to parse addressed string to json array .
+    /// Get collection of elements in an array found in given path. Activate ignoreType to parse addressed string to json array.
     public func array(_ path:String? = nil, ignoreType: Bool = false) -> [JSONEntity]? {
         if ignoreType {
             guard let arrayContent = getField(path, "string", { replaceEscapedQuotations($0.string) }, ignoreType: true) else { return nil }
@@ -204,75 +244,44 @@ public class JSONEntity {
         }
         copyArrayData = true
         let data = decodeData(path == nil ? "-1" : "\(path!).-1")
-        if data?.value.string != "$COMPLETE_ARRAY" || data?.type != "code" {
+        if data?.type != "CODE_ARRAY" {
             copyArrayData = false
             return nil
         }
         copyArrayData = false
-        return arrayValues
+        return data?.value.array
     }
     
-    /// Check if attribute or element exists on given address path
+    /// Check if attribute or element exists in given address path.
     public func isExist(_ path:String) -> Bool {
         return decodeData(path) != nil
     }
     
-    /// Get collection if key-value pair of the pointed object. The path must point to object type
+    /// Get array of key-value tuple of the object. The path must point to object type.
     public func entries(_ path: String? = nil) -> [(key: String, value: JSONEntity)]? {
         copyObjectEntries = true
         let data = decodeData(path == nil || path!.count == 0 ? "dummyAtr" : "\(path!)\(pathSpliter)dummyAtr")
-        if data?.value.string != "$COMPLETE_OBJECT" || data?.type != "code" {
+        if data?.type != "CODE_ENTRIES" {
             copyObjectEntries = false
             return nil
         }
         copyObjectEntries = false
-        return objectEntries
-    }
-    
-    /// Get entries of object like entries() method but value are returned with their natural representation instead of set of JSONEntity
-    public func entriesInNaturalValues(_ path: String? = nil) -> [(key: String, value: Any)]? {
-        copyObjectEntries = true
-        let data = decodeData(path == nil || path!.count == 0 ? "dummyAtr" : "\(path!)\(pathSpliter)dummyAtr")
-        if data?.value.string != "$COMPLETE_OBJECT" || data?.type != "code" {
-            copyObjectEntries = false
-            return nil
-        }
-        copyObjectEntries = false
-        return objectEntries.map({(
-            $0.key,
-            resolveValue($0.value.jsonText, $0.value.jsonData, $0.value.contentType)
-        )})
+        return data?.value.entries
     }
 
     private func resolveValue(_ stringData: String, _ byteData: UnsafeRawBufferPointer, _ type: String, serialize: Bool = false) -> Any {
         switch(type) {
-            case "number": return Double(stringData)!
-        case "object":
-            var objData: [String: Any] = [String: Any]()
-            JSONEntity(byteData, type).entries("")!.forEach({
-                key, nestedValue in objData[key] = resolveValue(nestedValue.jsonText, nestedValue.jsonData, nestedValue.contentType, serialize: serialize)
-            })
-            return objData
-            
-        case "array":
-            if !serialize {
-                return JSONEntity(byteData, "array").array()!
-            }
-         
-            return JSONEntity(byteData, "array").array()!
-                .map({ item in
-                    return resolveValue(item.jsonText,item.jsonData ,item.contentType, serialize: serialize)
-                }) as [Any]
-            
+            case "number": return Double(stringData) ?? "#INVALID_NUMERIC"
+            case "array": return JSONEntity(byteData, "array").array()!
             case "boolean": return stringData == "true" ? true : false
             case "null": return Constants.NULL
             default: return stringData
         }
     }
     
-    /// Read a json element without type constraints.
-    /// Similar to calling string(), array(), object() .etc but without knowing the type queried value
-    /// - Returns: the value addressed by the path and its type is returned as a tuple
+    /// Read JSON element without type constraints.
+    /// Similar to calling string(), array(), object() .etc but without knowing the data type
+    /// of queried value. Returns castable any value along with data type
     public func any(_ path: String) -> (value: Any, type: JSONType)? {
         guard let (value, type) = decodeData(path) else { return nil }
         if type == "object" {
@@ -281,12 +290,12 @@ public class JSONEntity {
         return (resolveValue(value.string, value.bytes, type), JSONType(type))
     }
     
-    /// get the type of value held by the content of this node
+    /// Get the data type of the value held by the content of this node.
     public func type() -> JSONType {
         return JSONType(contentType)
     }
     
-    /// convert the selected element content to representable string
+    /// Convert the selected element content to representable string.
     public func stringify(_ path: String? = nil) -> String? {
         if path == nil {
             return jsonData.count == 0 ? jsonText : String(jsonData.map({Character(UnicodeScalar($0))}))
@@ -300,28 +309,44 @@ public class JSONEntity {
         }))   
     }
     
-    /// Get the natural value of JSON element expressed associated swift type (except null represented in JSONStore.Constants.NULL).
-    /// If array then collection is returned where subelement also recursively procesed till to their primitive values.
-    /// If object then collection of key-value tupple is given. Like arrays value is also recursivelty proccessed
-    public func unWrap() -> Any {
-        return resolveValue(jsonText, jsonData, contentType, serialize: true)
+    /// Get the natural value of JSON node. Elements expressed in associated swift type except
+    /// for null represented in `.Constants.NULL` based on their data type. Both array and
+    /// object are represented by dictionary and array respectively and their subelements are
+    /// decoded recursively until to singular values.
+        public func decode() -> Any {
+        if contentType == "object" || contentType == "array" {
+            var iterator = jsonData.makeIterator()
+            return fowardToExtract(&iterator, firstCharacter: iterator.next()!).value.tree
+        }
+        return resolveValue(jsonText, jsonData, contentType)
     }
     
-    /// Get natural value of an element for given path with type of data. Similar to unWrap(path:)
-    public func unWrapWithType(_ path: String) -> (value: Any,type: JSONType)? {
+    /// Get natural value of an element for given path with data type. Similar to decode(path:).
+    public func decodeWithType(_ path: String) -> (value: Any,type: JSONType)? {
+        extractInnerContent = true
         guard let (value, type) = decodeData(path) else { return nil }
-        return (resolveValue(value.string, value.bytes, type, serialize: true), JSONType(type))
+        extractInnerContent = false
+        if (type == "object" || type == "array") {
+            return (value.tree, JSONType(type))
+        }
+        return (resolveValue(value.string, value.bytes, type), JSONType(type))
     }
     
-    /// Get natural value of the given path where object are represented as dictionary, null
-    /// as `JSONStore.Constants.NULL` other types to their respective forms. Each sub elements
-    ///  recurively shown until to their singular primitive values.
-    public func unWrap(_ path: String) -> Any? {
+    /// Get the natural value of JSON node. Elements expressed in associated swift type except
+    /// for null represented in `.Constants.NULL` based on their data type. Both array and
+    /// object are represented by dictionary and array respectively and their subelements are
+    /// decoded recursively until to singular values.
+    public func decode(_ path: String) -> Any? {
+        extractInnerContent = true
         guard let (value, type) = decodeData(path) else { return nil }
-        return resolveValue(value.string, value.bytes, type, serialize: true)
+        extractInnerContent = false
+        if (type == "object" || type == "array") && value.string == "CODE_DECODE" {
+            return value.tree
+        }
+        return resolveValue(value.string, value.bytes, type)
     }
     
-    /// capture the node addresss by the given path.
+    /// Capture the node addressed by the given path.
     public func take(_ path: String) -> JSONEntity? {
         guard let result = decodeData(path) else { return nil }
         return result.value.bytes.count == 0 ? 
@@ -329,8 +354,8 @@ public class JSONEntity {
             JSONEntity(result.value.memoryHolder, result.type)
     }
     
-    private func decodeData(_ inputPath:String) -> (value: Value, type: String)? {
-        return exploreData(inputPath, arrayValues: &arrayValues, objectEntries: &objectEntries, copyArrayData: copyArrayData, copyObjectEntries: copyObjectEntries)
+    private func decodeData(_ inputPath:String) -> (value: ValueStore, type: String)? {
+        return exploreData(inputPath, copyArrayData: copyArrayData, copyObjectEntries: copyObjectEntries)
     }
     
     private func trimSpace(_ input: String) -> String {
@@ -340,10 +365,132 @@ public class JSONEntity {
         }
         return output
     }
+    
+    private func parseSingularValue(_ input: String) -> Any {
+        if input.first == "t" {
+            return true
+        } else if input.first == "f" {
+            return false
+        } else if input.first == "n" {
+            return Constants.NULL
+        } else {
+            return Double(input) ?? "#INVALID_NUMERIC"
+        }
+    }
+    class CollectionHolder {
+        var type: String
+        var objectCollection: [String: Any]
+        var arrayCollection: [Any]
+        var reservedObjectKey = ""
+        
+        init(isObject: Bool) {
+            type = isObject ? "object" : "array"
+            objectCollection = [:]
+            arrayCollection = []
+        }
+        
+        func assignChildToObject(_ child: CollectionHolder) {
+            objectCollection[reservedObjectKey] = child.type == "object" ? child.objectCollection : child.arrayCollection
+        }
+        
+        func appendChildToArray(_ child: CollectionHolder) {
+            arrayCollection.append(child.type == "object" ? child.objectCollection : child.arrayCollection)
+        }
 
-    private func exploreData(_ inputPath:String, arrayValues: inout [JSONEntity], 
-        objectEntries: inout [(key: String, value: JSONEntity)], copyArrayData: Bool, copyObjectEntries: Bool
-        ) -> (value: Value, type: String)? {
+    }
+    
+    private func fowardToExtract(_ iterator: inout UnsafeRawBufferPointer.Iterator, firstCharacter: UInt8) -> (value: ValueStore, type: String) {
+        var stack: [CollectionHolder] = []
+        var isInQuotes = false
+        var grabbedKey = ""
+        var isGrabbingText = false
+        var grabbedText = ""
+        var notationBalance = 1
+        var shouldProccessObjectValue = false
+        var escapeCharacter = false
+        
+        if firstCharacter == 123 {
+            stack.append(CollectionHolder(isObject: true))
+        } else {
+            stack.append(CollectionHolder(isObject: false))
+        }
+        while true {
+            guard let char: UInt8 = iterator.next() else { break }
+            if !isInQuotes {
+                if char == 123 || char == 91 {
+                    notationBalance += 1
+                    if stack.last!.type == "object" {
+                        stack.last!.reservedObjectKey = grabbedKey
+                    }
+                    stack.append(CollectionHolder(isObject: char == 123))
+                    shouldProccessObjectValue = false
+                } else if char == 125 || char == 93 {
+                    notationBalance -= 1
+                    if notationBalance == 0 {
+                        return stack.first!.type == "object" ? (ValueStore(decodedData: stack.last!.objectCollection), "object") : (ValueStore(decodedData: stack.last!.arrayCollection), "array")
+                    }
+                    if isGrabbingText {
+                        if stack.last!.type == "object" {
+                            stack.last!.objectCollection[grabbedKey] = parseSingularValue(trimSpace(grabbedText))
+                        } else {
+                            stack.last!.arrayCollection.append(parseSingularValue(trimSpace(grabbedText)))
+                        }
+                        isGrabbingText = false
+                    }
+                    shouldProccessObjectValue = false
+                    let child = stack.removeLast()
+                    if stack.last!.type == "object" {
+                        stack.last!.assignChildToObject(child)
+                    } else {
+                        stack.last!.appendChildToArray(child)
+                    }
+                } else if char == 58 {
+                    shouldProccessObjectValue = true
+                    grabbedKey = grabbedText
+                } else if !isGrabbingText && ((char >= 48 && char <= 57) || char == 45
+                    || char == 116 || char == 102
+                    || char == 110) {
+                    grabbedText = ""
+                    isGrabbingText = true
+                } else if char == 44 && isGrabbingText {
+                    isGrabbingText = false
+                    if stack.last!.type == "object" {
+                        stack.last!.objectCollection[grabbedKey] = parseSingularValue(trimSpace(grabbedText))
+                    } else {
+                        stack.last!.arrayCollection.append(parseSingularValue(trimSpace(grabbedText)))
+                    }
+                    shouldProccessObjectValue = false
+                }
+            }
+            if !escapeCharacter && char == 34 {
+                isInQuotes = !isInQuotes
+                isGrabbingText = isInQuotes
+                if isGrabbingText {
+                    grabbedText = ""
+                } else {
+                    if stack.last!.type == "object" {
+                        if shouldProccessObjectValue {
+                            stack.last!.objectCollection[grabbedKey] = grabbedText
+                        }
+                    } else {
+                        stack.last!.arrayCollection.append(grabbedText)
+                    }
+                    shouldProccessObjectValue = false
+                }
+            } else if isGrabbingText {
+                grabbedText.append(Character(UnicodeScalar(char)))
+            }
+            if escapeCharacter {
+                escapeCharacter = false
+            } else if char == 92 {
+                escapeCharacter = true
+            }
+        }
+        return (ValueStore(decodedData: []), firstCharacter == 123 ? "object" : "array")
+    }
+    
+    private func exploreData(_ inputPath:String, copyArrayData: Bool, copyObjectEntries: Bool
+        ) -> (value: ValueStore, type: String)? {
         if !(contentType == "object" || contentType == "array") {
             return nil
         }
@@ -372,8 +519,8 @@ public class JSONEntity {
         var possibleType: String = ""
         var escapeCharacter: Bool = false
         
-        arrayValues = []
-        objectEntries = []
+        var arrayValues: [JSONEntity] = []
+        var objectEntries : [(key: String, value: JSONEntity)] = []
 
         if paths.count == 0 {
             print("[JSONStore] given path cannot be a empty string. Please provide a valid path.")
@@ -383,8 +530,9 @@ public class JSONEntity {
             print("[JSONStore] the path cannot be end with a intermediate representer - \(intermediateSymbol)")
             return nil
         }
-        
-        for char in jsonData {
+        var iterator = jsonData.makeIterator()
+        while true {
+            guard let char = iterator.next() else { break }
             // if within quotation ignore processing json literals...
             if !isInQuotes {
                 if char == 123 || char == 91 {
@@ -400,7 +548,6 @@ public class JSONEntity {
                                     grabbingDataType = char == 123 ? "object" : "array"
                                 }
                                 grabbedBytes.append(char)
-                                // grabbedText.append(Character(UnicodeScalar(char)))
                             }
                             continue
                         }
@@ -411,7 +558,9 @@ public class JSONEntity {
                     }
                     // if the last value of last key is object or array then start copy it
                     if (processedPathIndex == paths.count || isGrabbingArrayValues) && !isGrabbingNotation {
-                        // grabbedText = ""
+                        if extractInnerContent {
+                            return fowardToExtract(&iterator, firstCharacter: char)
+                        }
                         grabbedBytes = []
                         isGrabbingNotation = true
                         grabbingDataType = char == 123 ? "object" : "array"
@@ -420,7 +569,6 @@ public class JSONEntity {
                     // continue copying object/arrray inner characters...
                     if isGrabbingNotation {
                         grabbedBytes.append(char)
-                        //grabbedText.append(Character(UnicodeScalar(char)))
                         continue
                     }
                     
@@ -470,16 +618,15 @@ public class JSONEntity {
                         // when finished copy last primitive value on copyObjectEntries mode. Need to make sure the parent container notation is an object
                         if copyObjectEntries && char == 125 {
                             objectEntries.append((grabbingKey, JSONEntity(trimSpace(grabbedText), grabbingDataType)))
-                            return (Value("$COMPLETE_OBJECT"), "code")
+                            return (ValueStore(entriesData: objectEntries), "CODE_ENTRIES")
                         } else if isGrabbingArrayValues {
                             // append the pending grabbing text
                             arrayValues.append(JSONEntity(trimSpace(grabbedText), grabbingDataType))
                         } else {
-                            return (Value(trimSpace(grabbedText)), grabbingDataType)
+                            return (ValueStore(trimSpace(grabbedText)), grabbingDataType)
                         }
                     }
-                    if isGrabbingNotation { 
-                        // grabbedText.append(Character(UnicodeScalar(char)))
+                    if isGrabbingNotation {
                         grabbedBytes.append(char)
                     }
                     
@@ -498,7 +645,7 @@ public class JSONEntity {
                                 continue
                             }
                             if isGrabbingArrayValues {
-                                return (Value("$COMPLETE_ARRAY"), "code")
+                                return (ValueStore(arrayData: arrayValues), "CODE_ARRAY")
                             }
                             return nil
                         }
@@ -514,13 +661,13 @@ public class JSONEntity {
                                 isNavigatingUnknownPath = true
                                 continue
                             }
-                            if copyObjectEntries { return (Value("$COMPLETE_OBJECT"), "code") }
+                            if copyObjectEntries { return (ValueStore(entriesData: objectEntries), "CODE_ENTRIES") }
                             return nil
                         }
                         
                         // copy json object/array data upon reading last path index
                         if processedPathIndex == paths.count {
-                            if !copyObjectEntries { return (Value(grabbedBytes), grabbingDataType) }
+                            if !copyObjectEntries { return (ValueStore(grabbedBytes), grabbingDataType) }
                             objectEntries.append((grabbingKey, JSONEntity(grabbedBytes, grabbingDataType)))
                             startSearchValue = false
                             isGrabbingNotation = false
@@ -546,7 +693,6 @@ public class JSONEntity {
                     isInQuotes = !isInQuotes
                 }
                 grabbedBytes.append(char)
-                // grabbedText.append(Character(UnicodeScalar(char)))
             } else if startSearchValue {
                 if notationBalance == advancedOffset || (isCountArray && (advancedOffset + 1) == notationBalance) {
                     // ====== HANDLING GRABBING STRINGS =========
@@ -554,7 +700,7 @@ public class JSONEntity {
                     if !escapeCharacter && char == 34 {
                         isInQuotes = !isInQuotes
                         // if not the last proccesed value skip caturing value
-                        if !isGrabbingArrayValues && 
+                        if !isGrabbingArrayValues &&
                          (processedPathIndex + (isCountArray ? 1 : 0)) != paths.count {
                             continue
                         }
@@ -573,7 +719,7 @@ public class JSONEntity {
                                     grabbedText = ""
                                     continue
                                 }
-                                return (Value(grabbedText), "string")
+                                return (ValueStore(grabbedText), "string")
                             }
                             // appending string elements to entries
                             // processedPathIndex is decrement to stop stimulation the overal stimulation is over
@@ -628,7 +774,7 @@ public class JSONEntity {
                                     grabbedText = ""
                                     continue
                                 }
-                                return (Value(trimSpace(grabbedText)), grabbingDataType)
+                                return (ValueStore(trimSpace(grabbedText)), grabbingDataType)
                             }
                         } else if isGrabbingText {
                             grabbedText.append(Character(UnicodeScalar(char)))

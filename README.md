@@ -2,7 +2,7 @@
 
 # JSONStore (v2.5) :rocket:
 
-Swift, is a type of constrained language right? One way of parsing JSON is to parse JSON string to a known `Codable` JSON structure. In Swift 3 you can use `JSONSerialization` but still, you have to chain deserialization calls and it would be a mess when you have to check the existence of attributes or array values before reading or when handling any complex read queries. Also, there are times when the expected JSON structure also can have dynamic in a certain scenario, and would be messy to check the existence of value all the time. JSONStore help you to parse JSON in any free form and extract value without constraining it into a fixed type. This is a pure zero dependency `Swift` package with the technique of `Read Only Until Value Dicovered`  in a single read cycle and is performance efficient.
+Swift, is a type of constrained language right? One way of parsing JSON is to parse JSON string to a known `Codable` JSON structure. In Swift 3 you can use `JSONSerialization` but still, you have to chain deserialization calls and it would be a mess when you have to check the existence of attributes or array values before reading or when handling any complex read queries. Also, there are times when the expected JSON structure also can have dynamic in a certain scenario, and would be messy to check the existence of value all the time. JSONStore help you to parse JSON in any free form and extract value without constraining it into a fixed type. This is a pure zero dependency `Swift` package with the technique of `Read Only Need Content` in a single read cycle and which means no byte is read twice! which is why this library is really fast.
 
 ## Installation
 
@@ -164,15 +164,13 @@ you could additionally use `type()` to get the data type of the current JSON `re
 
 ## Serializing Data
 
-Sometimes you may need to write the results on a `serializable` destination such as an in-device cache where you have to omit the usage of class instances and unwarp its actual value. You can use `unWrap()` for this, `array` and `object` will be converted to `array` and `dictionary` recursively until reaching primitive values of boolean, numbers, and null.
+Sometimes you may need to write the results on a `serializable` destination such as an in-device cache where you have to omit the usage of class instances and unwarp its actual value. You can use `decode()` for this, `array` and `object` will be converted to `array` and `dictionary` recursively until reaching primitive values of boolean, numbers, and null.
 
 _Remember `null` is represented by `JSONStore.Constants.NULL`. This is to avoid optional wrapping._
 
-> Be aware that the `parse` function process JSON content recursively processes on each nested individual `array` and `object` and therefore can cost performance on heavily nested JSON content.
-
 ## Capturing references
 
-`take()` is used to capture the `JSONEntity`reference of the given path. You can query values in 2 ways:
+`take()` is used to capture the `JSONEntity` reference of the given path. You can query values in 2 ways:
 
 ```swift
 let value = reference.string(attributePath)!

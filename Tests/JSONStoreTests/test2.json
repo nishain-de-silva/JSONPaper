@@ -56,12 +56,15 @@
                {
                   "geoSpeare": "enwrapped the sun with materials from asteroid to extract energery"
                },
-               "cosmos technology"
+               "cosmos technology",
+               45,
+               {"note": "hello world"}
             ],
             {
                "research": {
                   "feasibilty": "reverse e=mc2 to convert energy to mass",
-                  "brand": "OpenMind"
+                  "brand": "OpenMind",
+                  "typo": null
                }
             }
          ]
