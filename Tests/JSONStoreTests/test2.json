@@ -35,8 +35,10 @@
           }
       ],
       "geologicalInformation": {
-         "anotherAttribute": {"hello there": "speciesType"},
-         "speciesType": "flower",
+         "anotherAttribute": {
+             "hello there": "speciesType"
+         },
+         "speciesType": ["flower", "naruto"],
          "recipents": "bees",
          "consumers": [
             "king-fisher",
@@ -54,7 +56,8 @@
          "futurePlans": [
             [
                {
-                  "geoSpeare": "enwrapped the sun with materials from asteroid to extract energery"
+                  "geoSpeare": "enwrapped the sun with materials from asteroid to extract energery",
+                  "small": "value"
                },
                "cosmos technology",
                45,

@@ -30,6 +30,7 @@ public class JSONEntity {
     private var intermediateSymbol: String.SubSequence = "???"
     private var pathSpliter: Character = "."
     private var typeMismatchWarningCount = 0
+    private var deleteAction = false
 
     private struct ValueStore {
         var string: String
@@ -38,7 +39,7 @@ public class JSONEntity {
         var entries: [(key: String, value: JSONEntity)]
         var array: [JSONEntity]
         var tree: any Collection
-
+        
         init(_ input: String) {
             string = input
             bytes = UnsafeRawBufferPointer(start: nil, count: 0)
@@ -46,7 +47,7 @@ public class JSONEntity {
             array = []
             tree = []
         }
-
+        
         init(_ data: [UInt8]) {
             memoryHolder = data
             bytes = memoryHolder.withUnsafeBytes({$0})
@@ -54,7 +55,7 @@ public class JSONEntity {
             entries = []
             array = []
             tree = []
-
+            
         }
         
         init(_ text: String, _ data: UnsafeRawBufferPointer) {
@@ -80,13 +81,13 @@ public class JSONEntity {
             array = arrayData
             tree = []
         }
-
-        init(decodedData: any Collection) {
+        
+        init(parsedData: any Collection) {
             string = ""
             bytes = UnsafeRawBufferPointer(start: nil, count: 0)
             entries = []
             array = []
-            tree = decodedData
+            tree = parsedData
         }
     }
     
@@ -94,11 +95,11 @@ public class JSONEntity {
     public init(_ jsonString: String) {
         jsonText = jsonString
         switch (jsonText.first) {
-            case "{": contentType = "object"
-            case "[": contentType = "array"
-            default:
-                print(JSONEntity.INVALID_START_CHARACTER_ERROR)
-                contentType = "string"
+        case "{": contentType = "object"
+        case "[": contentType = "array"
+        default:
+            print(JSONEntity.INVALID_START_CHARACTER_ERROR)
+            contentType = "string"
         }
         jsonData = UnsafeRawBufferPointer(start: jsonText.withUTF8({$0}).baseAddress, count: jsonText.count)
     }
@@ -107,11 +108,11 @@ public class JSONEntity {
     public init(_ jsonBufferPointer: UnsafeRawBufferPointer) {
         jsonData = jsonBufferPointer
         switch(jsonData.first) {
-            case 123: contentType = "object"
-            case 91: contentType = "array"
-            default:
-                print(JSONEntity.INVALID_START_CHARACTER_ERROR)
-                contentType = "string"
+        case 123: contentType = "object"
+        case 91: contentType = "array"
+        default:
+            print(JSONEntity.INVALID_START_CHARACTER_ERROR)
+            contentType = "string"
         }
     }
     
@@ -124,14 +125,14 @@ public class JSONEntity {
         }
         jsonData = buffer
         switch(jsonData.first) {
-            case 123: contentType = "object"
-            case 91: contentType = "array"
-            default:
-                print(JSONEntity.INVALID_START_CHARACTER_ERROR)
-                contentType = "string"
+        case 123: contentType = "object"
+        case 91: contentType = "array"
+        default:
+            print(JSONEntity.INVALID_START_CHARACTER_ERROR)
+            contentType = "string"
         }
     }
-
+    
     /// Provide mirror callback to recieve UnsafeRawBufferPointer instance.
     public init(_ provider:  ((UnsafeRawBufferPointer?)  -> UnsafeRawBufferPointer?) -> UnsafeRawBufferPointer?) {
         guard let buffer = provider({$0}) else {
@@ -141,14 +142,14 @@ public class JSONEntity {
         }
         jsonData = buffer
         switch(jsonData.first) {
-            case 123: contentType = "object"
-            case 91: contentType = "array"
-            default:
-                print(JSONEntity.INVALID_START_CHARACTER_ERROR)
-                contentType = "string"
+        case 123: contentType = "object"
+        case 91: contentType = "array"
+        default:
+            print(JSONEntity.INVALID_START_CHARACTER_ERROR)
+            contentType = "string"
         }
     }
-
+    
     // ======= PRIVATE INTITIALIZERS =====
     private init(_ json: String, _ type: String) {
         jsonText = json
@@ -157,7 +158,7 @@ public class JSONEntity {
             jsonData = UnsafeRawBufferPointer(start: jsonText.withUTF8({$0}).baseAddress, count: jsonText.count)
         }
     }
-
+    
     
     private init(_ json: [UInt8], _ type: String) {
         jsonDataMemoryHolder = json
@@ -268,14 +269,14 @@ public class JSONEntity {
         copyObjectEntries = false
         return data?.value.entries
     }
-
+    
     private func resolveValue(_ stringData: String, _ byteData: UnsafeRawBufferPointer, _ type: String, serialize: Bool = false) -> Any {
         switch(type) {
-            case "number": return Double(stringData) ?? "#INVALID_NUMERIC"
-            case "array": return JSONEntity(byteData, "array").array()!
-            case "boolean": return stringData == "true" ? true : false
-            case "null": return Constants.NULL
-            default: return stringData
+        case "number": return Double(stringData) ?? "#INVALID_NUMERIC"
+        case "array": return JSONEntity(byteData, "array").array()!
+        case "boolean": return stringData == "true" ? true : false
+        case "null": return Constants.NULL
+        default: return stringData
         }
     }
     
@@ -295,6 +296,373 @@ public class JSONEntity {
         return JSONType(contentType)
     }
     
+    private static func _serializeToBytes(_ node: Any, _ index: Int, _ tabCount: Int) -> [UInt8]  {
+        guard let object = node as? [String: Any] else {
+            guard let array = node as? [Any] else {
+                guard let string = node as? String else {
+                    guard let boolean =  node as? Bool else {
+                        guard let intNumber = node as? Int else {
+                            guard let doubleNumber = node as? Double else {
+                                if node as? Constants == .NULL {
+                                    return [110, 117, 108, 108]
+                                }
+                                return [34, 35, 73, 78, 86, 65, 76, 73, 68, 95, 84, 89, 80, 69, 34] // "#INVALID_TYPE"
+                            }
+                            return Array(String(doubleNumber).utf8)
+                        }
+                        return Array(String(intNumber).utf8)
+                    }
+                    return boolean ? [116, 114, 117, 101] : [102, 97, 108, 115, 101]
+                }
+                return [34] + Array(string.utf8) + [34]
+            }
+            let innerContent = array.map({_serializeToBytes($0, index + 1, tabCount)})
+            if tabCount != 0 {
+                let spacer: [UInt8] = Array(repeating: 32, count: (index + 1) * tabCount)
+                let endSpacer: [UInt8] = Array(repeating: 32, count: index * tabCount)
+                var data: [UInt8] = [91, 10]
+                let seperator: [UInt8] = [44, 10] + spacer
+                data.append(contentsOf: spacer)
+                data.append(contentsOf: innerContent.joined(separator: seperator))
+                data.append(10)
+                data.append(contentsOf: endSpacer)
+                data.append(93)
+                return data
+            }
+            return ([91] + innerContent.joined(separator: [44])) + [93]
+        }
+        let innerContent = object.map({(key, value) in
+            (([34] + Array(key.utf8)) + (tabCount != 0 ? [34, 58, 32] : [34, 58])) + _serializeToBytes(value,index + 1 , tabCount)
+        })
+        if tabCount != 0 {
+            let spacer: [UInt8] = Array(repeating: 32, count: (index + 1) * tabCount)
+            let endSpacer: [UInt8] = Array(repeating: 32, count: index * tabCount)
+            var data: [UInt8] = [123, 10]
+            let seperator: [UInt8] = [44, 10] + spacer
+            data.append(contentsOf: spacer)
+            data.append(contentsOf: innerContent.joined(separator: seperator))
+            data.append(10)
+            data.append(contentsOf: endSpacer)
+            data.append(125)
+            return data
+        }
+        return ([123] + (innerContent.joined(separator: [44]))) + [125]
+    }
+    
+    public static func write(_ jsonData: Any, prettify: Bool = true) -> JSONEntity {
+        let type = (jsonData as? [String: Any]) != nil ? "object" : "array"
+        return JSONEntity(_serializeToBytes(jsonData, 0, prettify ? 4 : 0),type)
+    }
+    
+    private func _continueCopyData(_ iterator: inout UnsafeRawBufferPointer.Iterator, _ data: inout [UInt8], _ dataToAdd: [UInt8], dataType: Int) {
+        var shoudRecoverComma = false
+        // 0 - object/array, string - 1, others - 3
+        if dataType == 0 {
+            var notationBalance = 1
+            while true {
+                guard let char = iterator.next() else { break }
+                if char == 123 || char == 91 {
+                    notationBalance += 1
+                } else if char == 125 || char == 93 {
+                    notationBalance -= 1
+                }
+                if notationBalance == 0 {
+                    break
+                }
+            }
+        } else if dataType == 1 {
+            while true {
+                guard let char = iterator.next() else { break }
+                if char == 34 {
+                    break
+                }
+            }
+        } else if dataType == 3 {
+            while true {
+                guard let char = iterator.next() else { break }
+                if char == 44 {
+                    shoudRecoverComma = true
+                    break
+                } else if char == 125 || char == 93 {
+                    break
+                }
+            }
+        }
+        data += dataToAdd
+        if shoudRecoverComma {
+            data.append(44)
+        }
+        while true {
+            guard let char = iterator.next() else { break }
+            data.append(char)
+        }
+        jsonDataMemoryHolder = data
+        jsonData = jsonDataMemoryHolder.withUnsafeBytes({$0})
+    }
+    
+    
+    private func _isLastCharacterOpenNode(_ data: inout [UInt8]) -> Bool {
+        while true {
+            if data.last == 10 || data.last == 32 {
+                data.removeLast()
+            } else {
+                return data.last == 123 || data.last == 91
+            }
+        }
+    }
+    
+    public enum UpdateMode {
+        case upsert
+        case onlyUpdate
+        case onlyInsert
+    }
+    
+    private func _deleteData(_ iterator: inout UnsafeRawBufferPointer.Iterator, _ copiedData: inout [UInt8], _ tabUnitCount: Int, _ prevNotationBalnce: Int, _ pathCount: Int) {
+        var didRemovedFirstComma = false
+        var isInQuotes = false
+        var notationBalance = prevNotationBalnce
+        while true {
+            guard let char = copiedData.last else { break }
+            if char == 34 {
+                isInQuotes = !isInQuotes
+            }
+            if !isInQuotes {
+                if (char == 123 || char == 91) {
+                    break
+                } else if char == 44 {
+                    copiedData.removeLast()
+                    didRemovedFirstComma = true
+                    break
+                }
+            }
+            copiedData.removeLast()
+        }
+        
+        var escapeCharacter = false
+        isInQuotes = false
+        
+        while true {
+            guard let char = iterator.next() else { break }
+            if !escapeCharacter && char == 34 {
+                isInQuotes = !isInQuotes
+            }
+            if !isInQuotes {
+                if char == 123 || char == 91 {
+                    notationBalance += 1
+                } else if char == 125 || char == 93 {
+                    notationBalance -= 1
+                    if notationBalance == (pathCount - 1) {
+                        if tabUnitCount != 0 {
+                            if didRemovedFirstComma {
+                                copiedData.append(10)
+                                copiedData.append(contentsOf: [UInt8](repeating: 32, count: (pathCount - 1) * tabUnitCount))
+                            }
+                        }
+                        copiedData.append(char)
+                        break
+                    }
+                }
+            }
+            if char == 44 && notationBalance == pathCount {
+                if didRemovedFirstComma {
+                    copiedData.append(44)
+                }
+                break
+            }
+            if escapeCharacter {
+                escapeCharacter = false
+            } else if char == 92 {
+                escapeCharacter = true
+            }
+        }
+        
+        while true {
+            guard let char = iterator.next() else { break }
+            copiedData.append(char)
+        }
+        
+        jsonDataMemoryHolder = copiedData
+        jsonData = jsonDataMemoryHolder.withUnsafeBytes({$0})
+    }
+    
+    /// delete path if exists. Return if delete successfull or not.
+    public func delete(_ path: String) -> Bool {
+        deleteAction = true
+        let result = upsert(path, 0)
+        deleteAction = false
+        return result
+    }
+    
+    private func _toNumber(_ bytes:[UInt8]) -> Int? {
+        var ans: Int = 0
+        var bytesCopy = bytes
+        let isNegative = bytesCopy.count > 0 && bytesCopy.removeFirst() == 45
+        for b in bytesCopy {
+            if b < 48 || b > 57 {
+                return nil
+            }
+            ans *= 10
+            ans += Int(b - 48)
+        }
+        if isNegative {
+            ans *= -1
+        }
+        return ans
+    }
+
+    /// Update or insert data to node of the given path.
+    /// Return wether operation successfull or not.
+    /// If you want either update or insert without both you can set writeMode parameter.
+    public func upsert(_ path: String, _ data: Any, writeMode: UpdateMode = .upsert) -> Bool {
+        if contentType != "object" && contentType != "array" {
+            return false
+        }
+        var tabUnitCount = 0
+        if jsonData[1] == 10 {
+            while (tabUnitCount + 2) < jsonData.count {
+                if jsonData[tabUnitCount + 2] == 32 {
+                    tabUnitCount += 1
+                } else { break }
+            }
+        }
+        var isQuotes = false
+        var isGrabbingKey = false
+        var grabbedKey: [UInt8] = []
+        var isEscaping = false
+        var notationBalance = 0
+        var processedindex = 0
+        let paths:[[UInt8]] = path.split(separator: pathSpliter).map({Array($0.utf8)})
+        var isCountArray = false
+        var pathIndexCursor = -1
+        var pathElementindex = 0
+        var copiedBytes: [UInt8] = []
+        var searchValue = false
+        var iterator = jsonData.makeIterator()
+        
+        while true {
+            guard let char = iterator.next() else { break }
+            if !isQuotes {
+                if char == 123 || char == 91 {
+                    notationBalance += 1
+                    if isCountArray && pathIndexCursor != pathElementindex {
+                        copiedBytes.append(char)
+                        continue
+                    }
+                    if searchValue {
+                        let bytesToAdd = JSONEntity._serializeToBytes(data, paths.count, tabUnitCount)
+                        _continueCopyData(&iterator, &copiedBytes, bytesToAdd, dataType: 0)
+                        return true
+                    } else if char == 91 && (processedindex + 1) == notationBalance {
+                        isCountArray = true
+                        guard let parsedInt = _toNumber(paths[processedindex]) else {
+                            return false
+                        }
+                        pathElementindex = parsedInt
+                        pathIndexCursor = 0
+                        if pathElementindex == 0 {
+                            processedindex += 1
+                            if processedindex == paths.count {
+                                if writeMode == .onlyInsert { return false }
+                                searchValue = true
+                                if deleteAction {
+                                    copiedBytes.append(char)
+                                    _deleteData(&iterator, &copiedBytes, tabUnitCount,notationBalance ,paths.count)
+                                    return true
+                                }
+                            }
+                        }
+                    }
+                } else if char == 125 || char == 93 {
+                    notationBalance -= 1
+                    if processedindex == notationBalance {
+                        if processedindex + 1 == paths.count && writeMode != .onlyUpdate {
+                            if !_isLastCharacterOpenNode(&copiedBytes) {
+                                copiedBytes.append(44)
+                            }
+                            if tabUnitCount != 0 {
+                                copiedBytes.append(10)
+                                copiedBytes.append(contentsOf: [UInt8] (repeating: 32, count: (paths.count) * tabUnitCount))
+                            }
+                            if char == 125 {
+                                copiedBytes.append(34)
+                                copiedBytes.append(contentsOf: paths[paths.count - 1])
+                                let endKeyPhrase: [UInt8] = tabUnitCount == 0 ? [34, 58] : [34, 58, 32]
+                                copiedBytes.append(contentsOf: endKeyPhrase)
+                            }
+                            
+                            var bytesToAdd = JSONEntity._serializeToBytes(data, paths.count, tabUnitCount)
+                            if tabUnitCount != 0 {
+                                bytesToAdd.append(10)
+                                bytesToAdd.append(contentsOf: [UInt8] (repeating: 32, count: (paths.count - 1) * tabUnitCount))
+                            }
+                            bytesToAdd.append(char)
+                            _continueCopyData(&iterator, &copiedBytes, bytesToAdd, dataType: 4)
+                            return true
+                        }
+                        return false
+                    }
+                } else if char == 58 && (processedindex + 1) == notationBalance {
+                    if paths[processedindex] == grabbedKey {
+                        processedindex += 1
+                        if processedindex == paths.count {
+                            if writeMode == .onlyInsert { return false }
+                            searchValue = true
+                            
+                            if deleteAction {
+                                _deleteData(&iterator, &copiedBytes, tabUnitCount,notationBalance ,paths.count)
+                                return true
+                            }
+                        }
+                    }
+                } else if searchValue && ((char >= 48 && char <= 57) || char == 45
+                || char == 116 || char == 102
+                || char == 110) {
+                    let bytesToAdd = JSONEntity._serializeToBytes(data, paths.count, tabUnitCount)
+                    _continueCopyData(&iterator, &copiedBytes, bytesToAdd, dataType: 3)
+                    return true
+                } else if char == 44 {
+                    if isCountArray && (processedindex + 1) == notationBalance {
+                        pathIndexCursor += 1
+                        if pathElementindex == pathIndexCursor {
+                            processedindex += 1
+                            if processedindex == paths.count {
+                                if writeMode == .onlyInsert { return false }
+                                searchValue = true
+                                if deleteAction {
+                                    copiedBytes.append(char)
+                                    _deleteData(&iterator, &copiedBytes, tabUnitCount,notationBalance ,paths.count)
+                                    return true
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if !isEscaping && char == 34 {
+                isQuotes = !isQuotes
+                if searchValue {
+                    let bytesToAdd = JSONEntity._serializeToBytes(data, paths.count, tabUnitCount)
+                    _continueCopyData(&iterator, &copiedBytes, bytesToAdd, dataType: 1)
+                    return true
+                } else if (processedindex + 1) == notationBalance {
+                    isGrabbingKey = isQuotes
+                    if isGrabbingKey {
+                        grabbedKey = []
+                    }
+                }
+            } else if isGrabbingKey {
+                grabbedKey.append(char)
+            }
+            if isEscaping {
+                isEscaping = false
+            } else if char == 92 {
+                isEscaping = true
+            }
+            copiedBytes.append(char)
+        }
+        return false
+    }
+    
     /// Convert the selected element content to representable string.
     public func stringify(_ path: String? = nil) -> String? {
         if path == nil {
@@ -312,8 +680,8 @@ public class JSONEntity {
     /// Get the natural value of JSON node. Elements expressed in associated swift type except
     /// for null represented in `.Constants.NULL` based on their data type. Both array and
     /// object are represented by dictionary and array respectively and their subelements are
-    /// decoded recursively until to singular values.
-        public func decode() -> Any {
+    /// parsed recursively until to singular values.
+        public func parse() -> Any {
         if contentType == "object" || contentType == "array" {
             var iterator = jsonData.makeIterator()
             return fowardToExtract(&iterator, firstCharacter: iterator.next()!).value.tree
@@ -321,8 +689,8 @@ public class JSONEntity {
         return resolveValue(jsonText, jsonData, contentType)
     }
     
-    /// Get natural value of an element for given path with data type. Similar to decode(path:).
-    public func decodeWithType(_ path: String) -> (value: Any,type: JSONType)? {
+    /// Get natural value of an element for given path with data type. Similar to parse(path:).
+    public func parseWithType(_ path: String) -> (value: Any,type: JSONType)? {
         extractInnerContent = true
         guard let (value, type) = decodeData(path) else { return nil }
         extractInnerContent = false
@@ -335,12 +703,12 @@ public class JSONEntity {
     /// Get the natural value of JSON node. Elements expressed in associated swift type except
     /// for null represented in `.Constants.NULL` based on their data type. Both array and
     /// object are represented by dictionary and array respectively and their subelements are
-    /// decoded recursively until to singular values.
-    public func decode(_ path: String) -> Any? {
+    /// parsed recursively until to singular values.
+    public func parse(_ path: String) -> Any? {
         extractInnerContent = true
         guard let (value, type) = decodeData(path) else { return nil }
         extractInnerContent = false
-        if (type == "object" || type == "array") && value.string == "CODE_DECODE" {
+        if (type == "object" || type == "array") && value.string == "CODE_parse" {
             return value.tree
         }
         return resolveValue(value.string, value.bytes, type)
@@ -358,7 +726,7 @@ public class JSONEntity {
         return exploreData(inputPath, copyArrayData: copyArrayData, copyObjectEntries: copyObjectEntries)
     }
     
-    private func trimSpace(_ input: String) -> String {
+    private func _trimSpace(_ input: String) -> String {
         var output = input
         while(output.last!.isWhitespace) {
             output.removeLast()
@@ -427,13 +795,13 @@ public class JSONEntity {
                 } else if char == 125 || char == 93 {
                     notationBalance -= 1
                     if notationBalance == 0 {
-                        return stack.first!.type == "object" ? (ValueStore(decodedData: stack.last!.objectCollection), "object") : (ValueStore(decodedData: stack.last!.arrayCollection), "array")
+                        return stack.first!.type == "object" ? (ValueStore(parsedData: stack.last!.objectCollection), "object") : (ValueStore(parsedData: stack.last!.arrayCollection), "array")
                     }
                     if isGrabbingText {
                         if stack.last!.type == "object" {
-                            stack.last!.objectCollection[grabbedKey] = parseSingularValue(trimSpace(grabbedText))
+                            stack.last!.objectCollection[grabbedKey] = parseSingularValue(_trimSpace(grabbedText))
                         } else {
-                            stack.last!.arrayCollection.append(parseSingularValue(trimSpace(grabbedText)))
+                            stack.last!.arrayCollection.append(parseSingularValue(_trimSpace(grabbedText)))
                         }
                         isGrabbingText = false
                     }
@@ -455,9 +823,9 @@ public class JSONEntity {
                 } else if char == 44 && isGrabbingText {
                     isGrabbingText = false
                     if stack.last!.type == "object" {
-                        stack.last!.objectCollection[grabbedKey] = parseSingularValue(trimSpace(grabbedText))
+                        stack.last!.objectCollection[grabbedKey] = parseSingularValue(_trimSpace(grabbedText))
                     } else {
-                        stack.last!.arrayCollection.append(parseSingularValue(trimSpace(grabbedText)))
+                        stack.last!.arrayCollection.append(parseSingularValue(_trimSpace(grabbedText)))
                     }
                     shouldProccessObjectValue = false
                 }
@@ -486,7 +854,7 @@ public class JSONEntity {
                 escapeCharacter = true
             }
         }
-        return (ValueStore(decodedData: []), firstCharacter == 123 ? "object" : "array")
+        return (ValueStore(parsedData: []), firstCharacter == 123 ? "object" : "array")
     }
     
     private func exploreData(_ inputPath:String, copyArrayData: Bool, copyObjectEntries: Bool
@@ -617,13 +985,13 @@ public class JSONEntity {
                     if isGrabbingText {
                         // when finished copy last primitive value on copyObjectEntries mode. Need to make sure the parent container notation is an object
                         if copyObjectEntries && char == 125 {
-                            objectEntries.append((grabbingKey, JSONEntity(trimSpace(grabbedText), grabbingDataType)))
+                            objectEntries.append((grabbingKey, JSONEntity(_trimSpace(grabbedText), grabbingDataType)))
                             return (ValueStore(entriesData: objectEntries), "CODE_ENTRIES")
                         } else if isGrabbingArrayValues {
                             // append the pending grabbing text
-                            arrayValues.append(JSONEntity(trimSpace(grabbedText), grabbingDataType))
+                            arrayValues.append(JSONEntity(_trimSpace(grabbedText), grabbingDataType))
                         } else {
-                            return (ValueStore(trimSpace(grabbedText)), grabbingDataType)
+                            return (ValueStore(_trimSpace(grabbedText)), grabbingDataType)
                         }
                     }
                     if isGrabbingNotation {
@@ -761,7 +1129,7 @@ public class JSONEntity {
                                 elementIndexCursor += 1
                             }
                             if copyObjectEntries {
-                                objectEntries.append((grabbingKey, JSONEntity(trimSpace(grabbedText), grabbingDataType)))
+                                objectEntries.append((grabbingKey, JSONEntity(_trimSpace(grabbedText), grabbingDataType)))
                                 startSearchValue = false
                                 isGrabbingText = false
                                 processedPathIndex -= 1
@@ -769,12 +1137,12 @@ public class JSONEntity {
                             } else  {
                                 // the below block need to require to copy terminate primitive values and append on meeting ',' terminator...
                                 if isGrabbingArrayValues {
-                                    arrayValues.append(JSONEntity(trimSpace(grabbedText), grabbingDataType))
+                                    arrayValues.append(JSONEntity(_trimSpace(grabbedText), grabbingDataType))
                                     isGrabbingText = false
                                     grabbedText = ""
                                     continue
                                 }
-                                return (ValueStore(trimSpace(grabbedText)), grabbingDataType)
+                                return (ValueStore(_trimSpace(grabbedText)), grabbingDataType)
                             }
                         } else if isGrabbingText {
                             grabbedText.append(Character(UnicodeScalar(char)))

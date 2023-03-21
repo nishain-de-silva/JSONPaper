@@ -31,7 +31,8 @@ final class JSONStoreTest: XCTestCase {
             let start = Date()
             
             let entity = JSONEntity(jsonData.withUnsafeBytes)
-            print("results", entity.entries("root.creditaInfo")?.map({$0.key}) ?? "nothing")
+            let results = entity.upsert("root.geologicalInformation.speciesType.-1", "mango")
+            print("results", entity.stringify()!)
             print("elapsed time - ", Date().timeIntervalSince(start))
         } catch {
             print(error)

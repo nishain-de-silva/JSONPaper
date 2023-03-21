@@ -33,7 +33,7 @@ let bufferPointer: UnsafeRawBufferPointer = networkData.withUnsafeBytes({$0})
 let json = JSONEntity(bufferPointer)
 ```
 
-## Reading Values
+# Reading Data
 To access an attribute or element you can provide a simple `String` path separated by dot (**`.`**) notation (or by another custom character with `setSpliter(Character:)`).
 ```swift
 import JSONStore
@@ -164,9 +164,40 @@ you could additionally use `type()` to get the data type of the current JSON `re
 
 ## Serializing Data
 
-Sometimes you may need to write the results on a `serializable` destination such as an in-device cache where you have to omit the usage of class instances and unwarp its actual value. You can use `decode()` for this, `array` and `object` will be converted to `array` and `dictionary` recursively until reaching primitive values of boolean, numbers, and null.
+Sometimes you may need to write the results on a `serializable` destination such as an in-device cache where you have to omit the usage of class instances and unwarp its actual value. You can use `parse()` for this, `array` and `object` will be converted to `array` and `dictionary` recursively until reaching primitive values of boolean, numbers, and null.
 
 _Remember `null` is represented by `JSONStore.Constants.NULL`. This is to avoid optional wrapping._
+
+# Writing Data
+
+## Update or insert
+
+You can use `upsert()` for update or insert operations. The default behaviour is if the last attribute/index described by the `path` is absent then new element is added. If you want change this behaviour where you specifically need to perform either update or insert only then set the `writeMode` parameter.
+
+To write JSON from scratch use static method `JSONEntity.write()` method,
+
+```swift
+
+JSONEntity.write([
+    "person": [
+        "name": "Joe smith",
+        "age": 26,
+        "hobbies": ["coding", "gaming"],
+        "education": [
+            "isGraduated": true,
+            "school": "Oxford",
+            "otherDetails": Constants.NULL
+        ]
+    ]
+]) // see easy peasy...
+
+```
+
+## Delete path
+
+You can use `delete()` to delete item on given path if the path is exist.
+
+On each write operation will return a boolean indicating wether the operation has suceeded or not.
 
 ## Capturing references
 
@@ -181,6 +212,8 @@ let value = reference.take(attributePath)?.string()
 ## Dumping Data
 
 To visually view data at a particular node for `debugging` purposes you can always use `.stringify(attributePath)` as it always gives the value in `string` format unless the attribute was not found which would give `nil`.
+
+If you find this library useful and got impressed please feel free to like this library so I would know people love this! :heart:
 
 ## Author and Main Contributor
 @Nishain De Silva
