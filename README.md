@@ -1,6 +1,6 @@
 <img src="logo.png" alt="drawing" style="width:100px;"/>
 
-# JSONStore (v2.5) :rocket:
+# JSONStore (v2.6) :rocket:
 
 Swift, is a type of constrained language right? One way of parsing JSON is to parse JSON string to a known `Codable` JSON structure. In Swift 3 you can use `JSONSerialization` but still, you have to chain deserialization calls and it would be a mess when you have to check the existence of attributes or array values before reading or when handling any complex read queries. Also, there are times when the expected JSON structure also can have dynamic in a certain scenario, and would be messy to check the existence of value all the time. JSONStore help you to parse JSON in any free form and extract value without constraining it into a fixed type. This is a pure zero dependency `Swift` package with the technique of `Read Only Need Content` in a single read cycle and which means no byte is read twice! which is why this library is really fast.
 
@@ -11,7 +11,7 @@ You can use `Swift Package Manager` to Install `JSONStore` from this repository 
 ## Usage
 
 > **Warning**
-> The library does `not` handle incorrect `JSON` format. Please make sure to sanitize the input string in such cases or otherwise would give you incorrect or unexpected any(s). JSON content must be decodable in `UTF` format (Best tested in `UTF-8` format).
+> The library does `not` handle or validate incorrect `JSON` format in preference for performance. Please make sure to handle and validate JSON in such cases or otherwise would give you incorrect or unexpected any(s). JSON content must be decodable in `UTF` format (Best tested in `UTF-8` format).
 ## Initializing
 
 There are a handful of ways to initialize JSONStore. You can initialize by `string` or from the `Data` instance. Initializing from `Data` is a bit trickier as JSONStore does not use `Foundation` so it cannot resolve the `Data` type. Hence you have to provide the `UnsafeRawBufferPointer` instance instead. You can also provide a function that requires map callback (eg: `Data.withUnsafeBytes` as constructor parameter _(see [withUnsafeBytes](https://developer.apple.com/documentation/swift/array/withunsafebytes(_:)) to learn about such callbacks)_.
@@ -34,7 +34,7 @@ let json = JSONEntity(bufferPointer)
 ```
 
 # Reading Data
-To access an attribute or element you can provide a simple `String` path separated by dot (**`.`**) notation (or by another custom character with `setSpliter(Character:)`).
+To access an attribute or element you can provide a simple `String` path separated by dot (**`.`**) notation (or by another custom character with `splitQuery(Character:)`).
 ```swift
 import JSONStore
 
@@ -44,7 +44,9 @@ let nameValue:String = JSONEntity(jsonText).string("properyA.properyB.2") ?? "de
 // or
 let someValue = entity("propertyA.???.value")
 ```
-- In the last example, `???` token represents zero or more intermediate dynamic properties before the attribute 'value'. You can find more about them in [Intermediate generic properties](#handling-intermediate-dynamic-properties).
+> **note**
+> You can temporarily make your next query string get split by a custom character you give in `splitQuery(by:)`. This is to evade situations where the object key/attribute also happens to have dot `(.)` notation in their name.
+- In the last example, the `???` token represents zero or more intermediate dynamic properties before the attribute 'value'. You can find more about them in [Intermediate generic properties](#handling-intermediate-dynamic-properties).
 
 You can use a numeric index to access an element in an array
 in place of an attribute in a nested object. for example:
@@ -77,11 +79,21 @@ Calling query methods by omitting the `path` parameter will extract the value in
 
 ```swift
 let stringArray = entity.array("pathToArray.studentNames").map({ item in
-	// item is a JSONEntity instance
-	return item.string() 
+    // item is a JSONEntity instance
+    return item.string() 
 })
 ```
+### Check value existence
 
+You can use `isExist(:path)` which will give either return boolean or an optional reference to the current instance if the path exists. In other words, you can,
+```swift
+// normal conditional use
+if entity.isExist("somePath") {
+    // some work
+}
+// or chain based on condition
+entity.isExist("somePath")?.stringify()
+```
 ## Parsing data types
 
 For `number`, `boolean`, `object`, and `array` query methods you can parse these values from JSON string by using the `ignoreType` parameter (default `false`)
@@ -169,12 +181,13 @@ Sometimes you may need to write the results on a `serializable` destination such
 _Remember `null` is represented by `JSONStore.Constants.NULL`. This is to avoid optional wrapping._
 
 # Writing Data
+JSONStore now supports the entire CRUD functionality. For write operations, there are 4 functions.
+- `delete()`
+- `update()`
+- `insert()`
+- `upsert()`
 
-## Update or insert
-
-You can use `upsert()` for update or insert operations. The default behaviour is if the last attribute/index described by the `path` is absent then new element is added. If you want change this behaviour where you specifically need to perform either update or insert only then set the `writeMode` parameter.
-
-To write JSON from scratch use static method `JSONEntity.write()` method,
+To write JSON from scratch use the static method `JSONEntity.write()` method,
 
 ```swift
 
@@ -183,8 +196,8 @@ JSONEntity.write([
         "name": "Joe smith",
         "age": 26,
         "hobbies": ["coding", "gaming"],
-        "education": [
-            "isGraduated": true,
+        "Education": [
+            "graduated": true,
             "school": "Oxford",
             "otherDetails": Constants.NULL
         ]
@@ -192,12 +205,62 @@ JSONEntity.write([
 ]) // see easy peasy...
 
 ```
+> JSONStore has a global constant with the name `null` as an alias for the enum `Constants.NULL` you can use that as well!
 
-## Delete path
+Write functions made it easy to return the instance that has been written you continue the rest of the work in the chain. When a write function failed JSONStore would provide an error message to find out where in the query did write function specifically failed.
 
-You can use `delete()` to delete item on given path if the path is exist.
+The `insert()` function is used for both adding key attributes for objects as well as appending items to the array. If you set a new attribute or indexed value for an object or array respectively then your path should be:
+```swift
+let sampleData = [
+    "sample": [
+        "nestedData": [34, 55]
+    ]
+]
+// for objects - path to object + new key
+let keyPath = "pathA.PathB.targetObject.newKey"
+entity.insert(keyPath, sampleData)
 
-On each write operation will return a boolean indicating wether the operation has suceeded or not.
+// for arrays - only specify path to array
+let arrayPath = "pathA.PathB.targetArray"
+entity.insert(arrayPath, sampleData)
+```
+
+> **Warning**
+> write query functions do not support intermediate `???` tags. You should be aware of the absolute path you want to write or delete.
+
+## Update and Upsert
+
+In the `update()` method, you generally give the full path to the target element and data to fully replace with. In `upsert` if the key or array item is not found to update then a new element will be added addressed object or array.
+
+```swift
+let entity.upsert("members.0.residentPlace", "Madacascar")
+
+let entity.upsert("members.0.hobbies.3", "bird watching")
+```
+- first example
+> if the `residentPlace` attribute exists it would be updated by a new value or residentPlace will be added as a new key with the newly assigned value.
+
+- second example
+
+> If a member only has 3 hobbies but since index 3 does not exist it would add another item to the hobbies array or else update the fourth item if it exists.
+
+Basically `insert()` and `update()` are constrained versions of `upsert()`. Insert operation only works if the key or index does not exist and `update()` works only for existing key or array index.
+
+### Delete node
+
+You can use `delete()` of course to delete an item on a given path if the item exists.
+
+### Reading bytes
+
+After all of these write operations you can receive the output as bytes in terms of `[Uint8]` or you can `optionally` pass a map function to customize the output with a generic type.
+
+```swift
+let response: Data = entity.update("members.2.location.home", "24/5 backstreet malls").toBytes({Data($0)})
+
+
+```
+
+
 
 ## Capturing references
 
@@ -209,6 +272,40 @@ let value = reference.string(attributePath)!
 let value = reference.take(attributePath)?.string()
 // both give the same result
 ```
+
+## Error Listeners
+
+JSONStore also allows adding a fail listener before calling a read or write a query to catch possible errors. Error callback gives you a tuple consisting of 2 values: 
+- The error code
+- Index of the query fragment where the issue has been detected from the query path.
+In the below example if the field `name` is actually a `string` instead of a nested `object` then JSONStore will give you an error
+
+```swift
+let result = entity
+    .onQueryFail({
+        print($0.error.describe())
+        print("occurred on the index:", $0.querySegmentIndex)
+    })
+    .update(
+        "user.details.name.first", "Joe"
+    )
+    .stringify()
+
+```
+would give you an output:
+```
+[nonNestedParent] intermediate parent is a leaf node and non-nested. Cannot transverse further
+occurred on the index: 2
+{
+    "user": {
+        "details": {
+            "name": "Bourne Smith"
+        }
+    }
+}
+```
+So it indicates the error happen on index 2 which means the "name" segment in the query and the error itself is an enum value `ErrorCode.nonNestedParent`. You can use these enum constants to catch a specific type of error.
+
 ## Dumping Data
 
 To visually view data at a particular node for `debugging` purposes you can always use `.stringify(attributePath)` as it always gives the value in `string` format unless the attribute was not found which would give `nil`.

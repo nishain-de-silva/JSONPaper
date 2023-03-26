@@ -1,7 +1,10 @@
+/// JSONStore represenentation of Null
 public enum Constants {
-    /// .NULL used to represent null JSON values on parse() and value()
     case NULL
 }
+
+/// JSONStore represenentation of Null
+public let Null = Constants.NULL
 
 public enum JSONType: String {
     case string = "string"
@@ -27,12 +30,13 @@ public class JSONEntity {
     private var copyArrayData:Bool = false
     private var copyObjectEntries:Bool = false
     private var extractInnerContent = false
-    private var intermediateSymbol: String.SubSequence = "???"
+    private var intermediateSymbol: [UInt8] = [63, 63, 63]
+    private var errorHandler: (((ErrorCode, Int)) -> Void)? = nil
+    private var errorInfo: (code: ErrorCode, occurredQueryIndex: Int)? = nil
     private var pathSpliter: Character = "."
     private var typeMismatchWarningCount = 0
-    private var deleteAction = false
 
-    private struct ValueStore {
+    private class ValueStore {
         var string: String
         var bytes: UnsafeRawBufferPointer
         var memoryHolder: [UInt8] = []
@@ -180,16 +184,13 @@ public class JSONEntity {
             print("[JSONStore] intermediate representer strictly cannot be a number!")
             return self
         }
-        intermediateSymbol = String.SubSequence(representer)
+        intermediateSymbol = Array(representer.utf8)
         return self
     }
 
-    /// Set the character to split the input path to attribute name/index segments.
-    /// Default split character is (.) dot notation.
-    /// You can use this in case if key attribute also have dot notation.
-    /// It is recommended the split character to be a speacial character.
-    public func setSpliter(_ splitRepresenter: Character) -> JSONEntity {
-        pathSpliter = splitRepresenter
+    /// Tempolary make the next query string to be split by the character given. Useful in case of encountering object attribute containing dot notation in their names.
+    public func splitQuery(by: Character) -> JSONEntity {
+        pathSpliter = by
         return self
     }
     
@@ -258,6 +259,11 @@ public class JSONEntity {
         return decodeData(path) != nil
     }
     
+    /// Check if attribute or element exists in given address path.
+    public func isExist(_ path:String) -> JSONEntity? {
+        return decodeData(path) != nil ? self : nil
+    }
+    
     /// Get array of key-value tuple of the object. The path must point to object type.
     public func entries(_ path: String? = nil) -> [(key: String, value: JSONEntity)]? {
         copyObjectEntries = true
@@ -317,7 +323,7 @@ public class JSONEntity {
                 return [34] + Array(string.utf8) + [34]
             }
             let innerContent = array.map({_serializeToBytes($0, index + 1, tabCount)})
-            if tabCount != 0 {
+            if tabCount != 0 && innerContent.count != 0 {
                 let spacer: [UInt8] = Array(repeating: 32, count: (index + 1) * tabCount)
                 let endSpacer: [UInt8] = Array(repeating: 32, count: index * tabCount)
                 var data: [UInt8] = [91, 10]
@@ -334,7 +340,7 @@ public class JSONEntity {
         let innerContent = object.map({(key, value) in
             (([34] + Array(key.utf8)) + (tabCount != 0 ? [34, 58, 32] : [34, 58])) + _serializeToBytes(value,index + 1 , tabCount)
         })
-        if tabCount != 0 {
+        if tabCount != 0 && innerContent.count != 0 {
             let spacer: [UInt8] = Array(repeating: 32, count: (index + 1) * tabCount)
             let endSpacer: [UInt8] = Array(repeating: 32, count: index * tabCount)
             var data: [UInt8] = [123, 10]
@@ -411,19 +417,41 @@ public class JSONEntity {
         }
     }
     
-    public enum UpdateMode {
+    private enum UpdateMode {
         case upsert
         case onlyUpdate
         case onlyInsert
+        case delete
+    }
+    
+    public enum ErrorCode: String {
+        case objectKeyNotFound = "cannot find object attribute"
+        case arrayIndexNotFound = "cannot find indexed item within array bounds"
+        case invalidArrayIndex = "array index is not a integer number"
+        case objectKeyAlreadyExists = "cannot insert because object attribute already exists"
+        case arrayIndexAlreadyExists = "cannot insert because array index is already exists"
+        case nonNestableRootType = "root data type is neither array or object and cannot transverse"
+        case nonNestedParent = "intermediate parent is a leaf node and non-nested. Cannot transverse further"
+        case emptyQueryPath = "query path cannot be empty at this query usage"
+        case indexGivenOnArrayAppend = "Do not define the index where the item should be added in insert operation, they are always added to end of the array"
+        case unknownTargetOnQuery = "the path cannot be end with a intermediate representer"
+        case other = "something went wrong. Element cannot be found"
+        
+        /// Provide string representation of error.
+        public func describe() -> String {
+            return "[\(self)] \(rawValue)"
+        }
     }
     
     private func _deleteData(_ iterator: inout UnsafeRawBufferPointer.Iterator, _ copiedData: inout [UInt8], _ tabUnitCount: Int, _ prevNotationBalnce: Int, _ pathCount: Int) {
         var didRemovedFirstComma = false
         var isInQuotes = false
         var notationBalance = prevNotationBalnce
+        var escapeCharacter = false
+        
         while true {
             guard let char = copiedData.last else { break }
-            if char == 34 {
+            if !escapeCharacter && char == 34 {
                 isInQuotes = !isInQuotes
             }
             if !isInQuotes {
@@ -436,9 +464,15 @@ public class JSONEntity {
                 }
             }
             copiedData.removeLast()
+            
+            if escapeCharacter {
+                escapeCharacter = false
+            } else if char == 92 {
+                escapeCharacter = true
+            }
         }
         
-        var escapeCharacter = false
+        escapeCharacter = false
         isInQuotes = false
         
         while true {
@@ -484,19 +518,15 @@ public class JSONEntity {
         jsonDataMemoryHolder = copiedData
         jsonData = jsonDataMemoryHolder.withUnsafeBytes({$0})
     }
-    
-    /// delete path if exists. Return if delete successfull or not.
-    public func delete(_ path: String) -> Bool {
-        deleteAction = true
-        let result = upsert(path, 0)
-        deleteAction = false
-        return result
-    }
-    
+            
     private func _toNumber(_ bytes:[UInt8]) -> Int? {
         var ans: Int = 0
         var bytesCopy = bytes
-        let isNegative = bytesCopy.count > 0 && bytesCopy.removeFirst() == 45
+        var isNegative = false
+        if bytesCopy.first == 45 {
+            isNegative = true
+            bytesCopy.removeFirst()
+        }
         for b in bytesCopy {
             if b < 48 || b > 57 {
                 return nil
@@ -509,13 +539,96 @@ public class JSONEntity {
         }
         return ans
     }
+    
+    private func _splitPath(_ path: String) -> [[UInt8]] {
+        let paths: [[UInt8]] =  path.split(separator: pathSpliter).map({Array($0.utf8)})
+        if pathSpliter != "." {
+            pathSpliter = "."
+        }
+        return paths
+    }
+    
+    /// Attach a query fail listener to the next read or write query. Listener will be removed after single use.
+    public func onQueryFail(_ handler: @escaping ((error: ErrorCode, querySegmentIndex: Int)) -> Void) -> JSONEntity {
+        errorHandler = handler
+        return self
+    }
+    
+    private func _addData(_ isInObject: Bool, _ dataToAdd: Any, _ iterator: inout UnsafeRawBufferPointer.Iterator, _ copiedBytes: inout [UInt8], _ tabUnitCount: Int, paths: [[UInt8]], _ preventAppendToArray: Bool) -> (ErrorCode, Int)? {
+        if !_isLastCharacterOpenNode(&copiedBytes) {
+            copiedBytes.append(44)
+        }
+        if tabUnitCount != 0 {
+            copiedBytes.append(10)
+            copiedBytes.append(contentsOf: [UInt8] (repeating: 32, count: (paths.count) * tabUnitCount))
+        }
+        if isInObject {
+            copiedBytes.append(34)
+            copiedBytes.append(contentsOf: paths[paths.count - 1])
+            let endKeyPhrase: [UInt8] = tabUnitCount == 0 ? [34, 58] : [34, 58, 32]
+            copiedBytes.append(contentsOf: endKeyPhrase)
+        } else if preventAppendToArray {
+            return (ErrorCode.indexGivenOnArrayAppend, paths.count - 1)
+        }
+        
+        var bytesToAdd = JSONEntity._serializeToBytes(dataToAdd, paths.count, tabUnitCount)
+        if tabUnitCount != 0 {
+            bytesToAdd.append(10)
+            bytesToAdd.append(contentsOf: [UInt8] (repeating: 32, count: (paths.count - 1) * tabUnitCount))
+        }
+        bytesToAdd.append(isInObject ? 125 : 93)
+        _continueCopyData(&iterator, &copiedBytes, bytesToAdd, dataType: 4)
+        return nil
+    }
 
-    /// Update or insert data to node of the given path.
-    /// Return wether operation successfull or not.
-    /// If you want either update or insert without both you can set writeMode parameter.
-    public func upsert(_ path: String, _ data: Any, writeMode: UpdateMode = .upsert) -> Bool {
+    /// Update the given given query path.
+    public func update(_ path: String, _ data: Any) -> JSONEntity {
+        errorInfo = _write(path, data, writeMode: .onlyUpdate)
+        if errorInfo != nil {
+            errorHandler?(errorInfo!)
+            errorHandler = nil
+        }
+        return self
+    }
+    
+    /// Insert an element to the given query path. If the last segment of the path is an array then the element will be added to the array else if it's a nonexistent key then the key attribute will be added to the object.
+    public func insert(_ path: String, _ data: Any) -> JSONEntity {
+        errorInfo = _write(path, data, writeMode: .onlyInsert)
+        if errorInfo != nil {
+            errorHandler?(errorInfo!)
+            errorHandler = nil
+        }
+        return self
+    }
+        
+    /// Update or insert data to node of the given query path.
+    public func upsert(_ path: String, _ data: Any) -> JSONEntity {
+        errorInfo = _write(path, data, writeMode: .upsert)
+        if errorInfo != nil {
+            errorHandler?(errorInfo!)
+            errorHandler = nil
+        }
+        return self
+    }
+    
+    /// delete path if exists. Return if delete successfull or not.
+    public func delete(_ path: String) -> JSONEntity {
+        errorInfo = _write(path, 0, writeMode: .delete)
+        if errorInfo != nil {
+            errorHandler?(errorInfo!)
+            errorHandler = nil
+        }
+        return self
+    }
+    
+    /// Returns the content data as [UInt8], map function parameter function optionally use to map the result with generic type.
+    public func toBytes<R>(_ mapFunction: ([UInt8]) -> R = {$0}) -> R {
+        return mapFunction(Array(jsonData))
+    }
+        
+    private func _write(_ path: String, _ data: Any, writeMode: UpdateMode) -> (ErrorCode, Int)? {
         if contentType != "object" && contentType != "array" {
-            return false
+            return (ErrorCode.nonNestableRootType, 0)
         }
         var tabUnitCount = 0
         if jsonData[1] == 10 {
@@ -531,107 +644,122 @@ public class JSONEntity {
         var isEscaping = false
         var notationBalance = 0
         var processedindex = 0
-        let paths:[[UInt8]] = path.split(separator: pathSpliter).map({Array($0.utf8)})
+        var paths:[[UInt8]] = _splitPath(path)
         var isCountArray = false
         var pathIndexCursor = -1
         var pathElementindex = 0
         var copiedBytes: [UInt8] = []
-        var searchValue = false
+        var searchValue = 0
         var iterator = jsonData.makeIterator()
+        var shouldAppendToArray = false
         
+        // speacial case scenario if appending to root array...
+        if paths.count == 0 {
+            if contentType == "array" && writeMode == .onlyInsert {
+                paths.append([45, 49])
+                shouldAppendToArray = true
+            } else {
+                return (ErrorCode.emptyQueryPath, -1)
+            }
+        }
         while true {
             guard let char = iterator.next() else { break }
             if !isQuotes {
                 if char == 123 || char == 91 {
                     notationBalance += 1
-                    if isCountArray && pathIndexCursor != pathElementindex {
-                        copiedBytes.append(char)
-                        continue
+                    if isCountArray {
+                        if pathIndexCursor != pathElementindex {
+                            copiedBytes.append(char)
+                            continue
+                        } else {
+                            isCountArray = false
+                        }
                     }
-                    if searchValue {
+                    if searchValue == 1 {
+                        if writeMode == .onlyInsert {
+                            if char == 91 {
+                                isCountArray = true
+                                searchValue = 0
+                                pathElementindex = -1
+                                pathIndexCursor = 0
+                                paths.append([45, 49])
+                                copiedBytes.append(char)
+                                shouldAppendToArray = true
+                                continue
+                            }
+                            return (isCountArray ? ErrorCode.arrayIndexAlreadyExists : ErrorCode.objectKeyAlreadyExists, processedindex - 1)
+                        }
                         let bytesToAdd = JSONEntity._serializeToBytes(data, paths.count, tabUnitCount)
                         _continueCopyData(&iterator, &copiedBytes, bytesToAdd, dataType: 0)
-                        return true
+                        return nil
                     } else if char == 91 && (processedindex + 1) == notationBalance {
                         isCountArray = true
                         guard let parsedInt = _toNumber(paths[processedindex]) else {
-                            return false
+                            return (ErrorCode.invalidArrayIndex, processedindex)
                         }
+                        searchValue = 0
                         pathElementindex = parsedInt
                         pathIndexCursor = 0
                         if pathElementindex == 0 {
                             processedindex += 1
+                            searchValue = 2
                             if processedindex == paths.count {
-                                if writeMode == .onlyInsert { return false }
-                                searchValue = true
-                                if deleteAction {
+                                searchValue = 1
+                                if writeMode == .delete {
                                     copiedBytes.append(char)
                                     _deleteData(&iterator, &copiedBytes, tabUnitCount,notationBalance ,paths.count)
-                                    return true
+                                    return nil
                                 }
                             }
                         }
                     }
+                    else if searchValue != 0{
+                        searchValue = 0
+                    }
                 } else if char == 125 || char == 93 {
                     notationBalance -= 1
                     if processedindex == notationBalance {
-                        if processedindex + 1 == paths.count && writeMode != .onlyUpdate {
-                            if !_isLastCharacterOpenNode(&copiedBytes) {
-                                copiedBytes.append(44)
-                            }
-                            if tabUnitCount != 0 {
-                                copiedBytes.append(10)
-                                copiedBytes.append(contentsOf: [UInt8] (repeating: 32, count: (paths.count) * tabUnitCount))
-                            }
-                            if char == 125 {
-                                copiedBytes.append(34)
-                                copiedBytes.append(contentsOf: paths[paths.count - 1])
-                                let endKeyPhrase: [UInt8] = tabUnitCount == 0 ? [34, 58] : [34, 58, 32]
-                                copiedBytes.append(contentsOf: endKeyPhrase)
-                            }
-                            
-                            var bytesToAdd = JSONEntity._serializeToBytes(data, paths.count, tabUnitCount)
-                            if tabUnitCount != 0 {
-                                bytesToAdd.append(10)
-                                bytesToAdd.append(contentsOf: [UInt8] (repeating: 32, count: (paths.count - 1) * tabUnitCount))
-                            }
-                            bytesToAdd.append(char)
-                            _continueCopyData(&iterator, &copiedBytes, bytesToAdd, dataType: 4)
-                            return true
+                        if processedindex + 1 == paths.count && (writeMode == .upsert || writeMode == .onlyInsert) {
+                            return _addData(char == 125, data, &iterator, &copiedBytes, tabUnitCount, paths: paths, char == 93 && writeMode == .onlyInsert && !shouldAppendToArray)
                         }
-                        return false
+                        return (char == 125 ? ErrorCode.objectKeyNotFound : ErrorCode.arrayIndexNotFound, processedindex)
                     }
                 } else if char == 58 && (processedindex + 1) == notationBalance {
                     if paths[processedindex] == grabbedKey {
                         processedindex += 1
+                        searchValue = 2
                         if processedindex == paths.count {
-                            if writeMode == .onlyInsert { return false }
-                            searchValue = true
-                            
-                            if deleteAction {
+                            searchValue = 1
+                            if writeMode == .delete {
                                 _deleteData(&iterator, &copiedBytes, tabUnitCount,notationBalance ,paths.count)
-                                return true
+                                return nil
                             }
                         }
                     }
-                } else if searchValue && ((char >= 48 && char <= 57) || char == 45
+                } else if searchValue > 0 && ((char >= 48 && char <= 57) || char == 45
                 || char == 116 || char == 102
                 || char == 110) {
+                    if searchValue == 2 {
+                        return (ErrorCode.nonNestedParent, processedindex - 1)
+                    }
+                    if writeMode == .onlyInsert {
+                        return (isCountArray ? ErrorCode.arrayIndexAlreadyExists : ErrorCode.objectKeyAlreadyExists, processedindex - 1)
+                    }
                     let bytesToAdd = JSONEntity._serializeToBytes(data, paths.count, tabUnitCount)
                     _continueCopyData(&iterator, &copiedBytes, bytesToAdd, dataType: 3)
-                    return true
+                    return nil
                 } else if char == 44 {
                     if isCountArray && (processedindex + 1) == notationBalance {
                         pathIndexCursor += 1
                         if pathElementindex == pathIndexCursor {
                             processedindex += 1
+                            searchValue = 2
                             if processedindex == paths.count {
-                                if writeMode == .onlyInsert { return false }
-                                searchValue = true
-                                if deleteAction {
+                                searchValue = 1
+                                if writeMode == .delete {
                                     copiedBytes.append(char)
                                     _deleteData(&iterator, &copiedBytes, tabUnitCount,notationBalance ,paths.count)
-                                    return true
+                                    return nil
                                 }
                             }
                         }
@@ -640,10 +768,17 @@ public class JSONEntity {
             }
             if !isEscaping && char == 34 {
                 isQuotes = !isQuotes
-                if searchValue {
+                if searchValue > 0 {
+                    if searchValue == 2 {
+                        return (ErrorCode.nonNestedParent, processedindex - 1)
+                    }
+                    if writeMode == .onlyInsert {
+                        return (isCountArray ? ErrorCode.arrayIndexAlreadyExists : ErrorCode.objectKeyAlreadyExists, paths.count - 2)
+                    }
+
                     let bytesToAdd = JSONEntity._serializeToBytes(data, paths.count, tabUnitCount)
                     _continueCopyData(&iterator, &copiedBytes, bytesToAdd, dataType: 1)
-                    return true
+                    return nil
                 } else if (processedindex + 1) == notationBalance {
                     isGrabbingKey = isQuotes
                     if isGrabbingKey {
@@ -660,21 +795,23 @@ public class JSONEntity {
             }
             copiedBytes.append(char)
         }
-        return false
+        return (ErrorCode.other, processedindex)
     }
     
     /// Convert the selected element content to representable string.
-    public func stringify(_ path: String? = nil) -> String? {
-        if path == nil {
-            return jsonData.count == 0 ? jsonText : String(jsonData.map({Character(UnicodeScalar($0))}))
-        }
-        guard let result =  decodeData(path!)
+    public func stringify(_ path: String) -> String? {
+        guard let result =  decodeData(path)
         else { return nil }
         
         return result.value.bytes.count == 0 ? result.value.string : 
         String(result.value.bytes.map({
                 Character(UnicodeScalar($0))
         }))   
+    }
+    
+    /// Convert the selected element content to representable string.
+    public func stringify() -> String {
+        return jsonData.count == 0 ? jsonText : String(jsonData.map({Character(UnicodeScalar($0))}))
     }
     
     /// Get the natural value of JSON node. Elements expressed in associated swift type except
@@ -723,7 +860,16 @@ public class JSONEntity {
     }
     
     private func decodeData(_ inputPath:String) -> (value: ValueStore, type: String)? {
-        return exploreData(inputPath, copyArrayData: copyArrayData, copyObjectEntries: copyObjectEntries)
+        let results = exploreData(inputPath, copyArrayData: copyArrayData, copyObjectEntries: copyObjectEntries)
+        if errorInfo != nil {
+            errorHandler?(errorInfo!)
+            errorHandler = nil
+        }
+        return results
+    }
+    
+    private func _asString(_ bytes: [UInt8]) -> String {
+        return String(bytes.map({Character(UnicodeScalar($0))}))
     }
     
     private func _trimSpace(_ input: String) -> String {
@@ -794,9 +940,6 @@ public class JSONEntity {
                     shouldProccessObjectValue = false
                 } else if char == 125 || char == 93 {
                     notationBalance -= 1
-                    if notationBalance == 0 {
-                        return stack.first!.type == "object" ? (ValueStore(parsedData: stack.last!.objectCollection), "object") : (ValueStore(parsedData: stack.last!.arrayCollection), "array")
-                    }
                     if isGrabbingText {
                         if stack.last!.type == "object" {
                             stack.last!.objectCollection[grabbedKey] = parseSingularValue(_trimSpace(grabbedText))
@@ -804,6 +947,9 @@ public class JSONEntity {
                             stack.last!.arrayCollection.append(parseSingularValue(_trimSpace(grabbedText)))
                         }
                         isGrabbingText = false
+                    }
+                    if notationBalance == 0 {
+                        return stack.first!.type == "object" ? (ValueStore(parsedData: stack.last!.objectCollection), "object") : (ValueStore(parsedData: stack.last!.arrayCollection), "array")
                     }
                     shouldProccessObjectValue = false
                     let child = stack.removeLast()
@@ -859,10 +1005,12 @@ public class JSONEntity {
     
     private func exploreData(_ inputPath:String, copyArrayData: Bool, copyObjectEntries: Bool
         ) -> (value: ValueStore, type: String)? {
+        errorInfo = nil
         if !(contentType == "object" || contentType == "array") {
+            errorInfo = (ErrorCode.nonNestableRootType, 0)
             return nil
         }
-        var paths = inputPath.split(separator: pathSpliter)
+        var paths:[[UInt8]] = _splitPath(inputPath)
         var processedPathIndex = 0
         var isNavigatingUnknownPath = false
         var advancedOffset = 0
@@ -873,7 +1021,7 @@ public class JSONEntity {
         var isGrabbingText = false
         var grabbedText = ""
         var grabbedBytes: [UInt8] = []
-        var grabbingKey = ""
+        var grabbingKey:[UInt8] = []
         var needProccessKey = false
         var isGrabbingNotation = false
         var isGrabbingKey = false
@@ -891,11 +1039,11 @@ public class JSONEntity {
         var objectEntries : [(key: String, value: JSONEntity)] = []
 
         if paths.count == 0 {
-            print("[JSONStore] given path cannot be a empty string. Please provide a valid path.")
+            errorInfo = (ErrorCode.emptyQueryPath, -1)
             return nil
         }
         if paths.last == intermediateSymbol {
-            print("[JSONStore] the path cannot be end with a intermediate representer - \(intermediateSymbol)")
+            errorInfo = (ErrorCode.unknownTargetOnQuery, paths.count - 1)
             return nil
         }
         var iterator = jsonData.makeIterator()
@@ -942,7 +1090,7 @@ public class JSONEntity {
                     
                     // intiate elements counting inside array on reaching open bracket...
                     if char == 91 && !isCountArray && ((advancedOffset + 1) == notationBalance || isNavigatingUnknownPath) {
-                        let parsedIndex = Int(paths[processedPathIndex])
+                        let parsedIndex = _toNumber(paths[processedPathIndex])
                         // occur when trying to access element of array with non-number index
                         if parsedIndex == nil {
                            if paths[processedPathIndex] == intermediateSymbol {
@@ -951,6 +1099,7 @@ public class JSONEntity {
                                 tranversalHistory.append((processedPathIndex, advancedOffset))
                                 continue
                            } else if isNavigatingUnknownPath { continue }
+                            errorInfo = (ErrorCode.invalidArrayIndex, processedPathIndex)
                             return nil
                         }
                         if isNavigatingUnknownPath {
@@ -985,7 +1134,7 @@ public class JSONEntity {
                     if isGrabbingText {
                         // when finished copy last primitive value on copyObjectEntries mode. Need to make sure the parent container notation is an object
                         if copyObjectEntries && char == 125 {
-                            objectEntries.append((grabbingKey, JSONEntity(_trimSpace(grabbedText), grabbingDataType)))
+                            objectEntries.append((_asString(grabbingKey), JSONEntity(_trimSpace(grabbedText), grabbingDataType)))
                             return (ValueStore(entriesData: objectEntries), "CODE_ENTRIES")
                         } else if isGrabbingArrayValues {
                             // append the pending grabbing text
@@ -1015,6 +1164,7 @@ public class JSONEntity {
                             if isGrabbingArrayValues {
                                 return (ValueStore(arrayData: arrayValues), "CODE_ARRAY")
                             }
+                            errorInfo = (ErrorCode.arrayIndexNotFound, paths.count - 1)
                             return nil
                         }
                         
@@ -1029,14 +1179,15 @@ public class JSONEntity {
                                 isNavigatingUnknownPath = true
                                 continue
                             }
-                            if copyObjectEntries { return (ValueStore(entriesData: objectEntries), "CODE_ENTRIES") }
+                            if copyObjectEntries && (paths.count - 1) == processedPathIndex { return (ValueStore(entriesData: objectEntries), "CODE_ENTRIES") }
+                            errorInfo = (ErrorCode.objectKeyNotFound, paths.count - 1)
                             return nil
                         }
                         
                         // copy json object/array data upon reading last path index
                         if processedPathIndex == paths.count {
                             if !copyObjectEntries { return (ValueStore(grabbedBytes), grabbingDataType) }
-                            objectEntries.append((grabbingKey, JSONEntity(grabbedBytes, grabbingDataType)))
+                            objectEntries.append((_asString(grabbingKey), JSONEntity(grabbedBytes, grabbingDataType)))
                             startSearchValue = false
                             isGrabbingNotation = false
                             processedPathIndex -= 1
@@ -1067,17 +1218,18 @@ public class JSONEntity {
                     // ignore escaped double quotation characters inside string values...
                     if !escapeCharacter && char == 34 {
                         isInQuotes = !isInQuotes
-                        // if not the last proccesed value skip caturing value
-                        if !isGrabbingArrayValues &&
-                         (processedPathIndex + (isCountArray ? 1 : 0)) != paths.count {
-                            continue
-                        }
                         // array index matching does not apply on isGrabbingArrayValues as need to proccess all elements in the array
                         if isCountArray && !isGrabbingArrayValues && elementIndexCursor != pathArrayIndex {
                             if isInQuotes {
                                 grabbingDataType = "string"
                             }
                             continue
+                        }
+                        // if not the last proccesed value skip caturing value
+                        if !isGrabbingArrayValues &&
+                         (processedPathIndex + (isCountArray ? 1 : 0)) != paths.count {
+                            errorInfo = (ErrorCode.nonNestedParent, processedPathIndex - 1)
+                            return nil
                         }
                         isGrabbingText = !isGrabbingText
                         if !isGrabbingText {
@@ -1091,7 +1243,7 @@ public class JSONEntity {
                             }
                             // appending string elements to entries
                             // processedPathIndex is decrement to stop stimulation the overal stimulation is over
-                            objectEntries.append((grabbingKey, JSONEntity(grabbedText, "string")))
+                            objectEntries.append((_asString(grabbingKey), JSONEntity(grabbedText, "string")))
                             startSearchValue = false
                             processedPathIndex -= 1
                             advancedOffset -= 1
@@ -1111,11 +1263,12 @@ public class JSONEntity {
                             else if char == 116 || char == 102 { possibleType = "boolean" }
                             else if char == 110 { possibleType = "null" }
                             if possibleType != "" {
-                                if !isGrabbingArrayValues && (processedPathIndex + (isCountArray ? 1 : 0)) != paths.count {
-                                    continue
-                                }
                                 grabbingDataType = possibleType
                                 if isCountArray && !isGrabbingArrayValues && elementIndexCursor != pathArrayIndex { continue }
+                                if !isGrabbingArrayValues && (processedPathIndex + (isCountArray ? 1 : 0)) != paths.count {
+                                    errorInfo = (ErrorCode.nonNestedParent, processedPathIndex - 1)
+                                    return nil
+                                }
                                 grabbedText = ""
                                 grabbedText.append(Character(UnicodeScalar(char)))
                                 isGrabbingText = true
@@ -1129,7 +1282,7 @@ public class JSONEntity {
                                 elementIndexCursor += 1
                             }
                             if copyObjectEntries {
-                                objectEntries.append((grabbingKey, JSONEntity(_trimSpace(grabbedText), grabbingDataType)))
+                                objectEntries.append((_asString(grabbingKey), JSONEntity(_trimSpace(grabbedText), grabbingDataType)))
                                 startSearchValue = false
                                 isGrabbingText = false
                                 processedPathIndex -= 1
@@ -1160,13 +1313,13 @@ public class JSONEntity {
                     if (advancedOffset + 1) == notationBalance || isNavigatingUnknownPath {
                         isGrabbingKey = !isGrabbingKey
                         if isGrabbingKey {
-                            grabbingKey = ""
+                            grabbingKey = []
                         } else {
                             needProccessKey = true
                         }
                     }
                 } else if isGrabbingKey {
-                    grabbingKey.append(Character(UnicodeScalar(char)))
+                    grabbingKey.append(char)
                 } else if needProccessKey && char == 58 {
                     needProccessKey = false
                     // if found start searching for object value for object key
@@ -1188,6 +1341,7 @@ public class JSONEntity {
                 escapeCharacter = true
             }
         }
+        errorInfo = (ErrorCode.other, processedPathIndex)
         return nil
     }
     

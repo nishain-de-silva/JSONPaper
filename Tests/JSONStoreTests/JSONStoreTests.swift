@@ -25,15 +25,19 @@ final class JSONStoreTest: XCTestCase {
         // Any test you write for XCTest can be annotated as throws and async.
         // Mark your test throws to produce an unexpected failure when your test encounters an uncaught error.
         // Mark your test async to allow awaiting for asynchronous code to complete. Check the results w;;ith expections afterwards.
-        let path = Bundle.module.path(forResource: "test2", ofType: "json")
+        let path = Bundle.module.path(forResource: "large-file", ofType: "json")
         do {
             let jsonData = try Data(contentsOf: URL(fileURLWithPath: path!))
             let start = Date()
-            
             let entity = JSONEntity(jsonData.withUnsafeBytes)
-            let results = entity.upsert("root.geologicalInformation.speciesType.-1", "mango")
-            print("results", entity.stringify()!)
+            let result = entity
+                .onQueryFail({
+                    print($0.error.describe())
+                    print("occured on", $0.querySegmentIndex)
+                })
+                .update("11350.id", "newId")
             print("elapsed time - ", Date().timeIntervalSince(start))
+            print(result.stringify("11350") ?? "nothing")
         } catch {
             print(error)
         }
