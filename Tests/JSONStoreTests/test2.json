@@ -3,15 +3,16 @@
       "another": [
          34,
          {
-            "waking": "good morning",
+            "waking": ["good morning", null, -2.34, +45, false],
             "day": 24,
-            "dota": "temperature",
+            "dota": "temper\\\"ature",
             "temperature": 56,
             "moredetails": {
-               "ahago": "hello",
-               "temperature": 87,
-               "day": 52,
+               "ahago": "{he\"llo}",
+               "{temperature}": 87,
+               "day\"": 52,
                "someList": [47]
+               "dali": true
             },
             "location": {
                "district": "southern province",
@@ -24,6 +25,7 @@
       ],
       "other": [
           55,
+          "samples",
           {
               "location": {
                   
@@ -32,7 +34,8 @@
                   }
               },
               "dat": 57
-          }
+          },
+          null
       ],
       "geologicalInformation": {
          "anotherAttribute": {

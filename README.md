@@ -255,7 +255,7 @@ You can use `delete()` of course to delete an item on a given path if the item e
 After all of these write operations you can receive the output as bytes in terms of `[Uint8]` or you can `optionally` pass a map function to customize the output with a generic type.
 
 ```swift
-let response: Data = entity.update("members.2.location.home", "24/5 backstreet malls").toBytes({Data($0)})
+let response: Data = entity.update("members.2.location.home", "24/5 backstreet malls").bytes({Data($0)})
 
 
 ```

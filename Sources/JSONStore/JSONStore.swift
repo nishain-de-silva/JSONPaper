@@ -245,7 +245,7 @@ public class JSONEntity {
             return JSONEntity(arrayContent).array()
         }
         copyArrayData = true
-        let data = decodeData(path == nil ? "-1" : "\(path!).-1")
+        let data = decodeData(path ?? "")
         if data?.type != "CODE_ARRAY" {
             copyArrayData = false
             return nil
@@ -267,7 +267,7 @@ public class JSONEntity {
     /// Get array of key-value tuple of the object. The path must point to object type.
     public func entries(_ path: String? = nil) -> [(key: String, value: JSONEntity)]? {
         copyObjectEntries = true
-        let data = decodeData(path == nil || path!.count == 0 ? "dummyAtr" : "\(path!)\(pathSpliter)dummyAtr")
+        let data = decodeData(path ?? "")
         if data?.type != "CODE_ENTRIES" {
             copyObjectEntries = false
             return nil
@@ -426,7 +426,7 @@ public class JSONEntity {
     
     public enum ErrorCode: String {
         case objectKeyNotFound = "cannot find object attribute"
-        case arrayIndexNotFound = "cannot find indexed item within array bounds"
+        case arrayIndexNotFound = "cannot find given index within array bounds"
         case invalidArrayIndex = "array index is not a integer number"
         case objectKeyAlreadyExists = "cannot insert because object attribute already exists"
         case arrayIndexAlreadyExists = "cannot insert because array index is already exists"
@@ -434,8 +434,10 @@ public class JSONEntity {
         case nonNestedParent = "intermediate parent is a leaf node and non-nested. Cannot transverse further"
         case emptyQueryPath = "query path cannot be empty at this query usage"
         case indexGivenOnArrayAppend = "Do not define the index where the item should be added in insert operation, they are always added to end of the array"
-        case unknownTargetOnQuery = "the path cannot be end with a intermediate representer"
-        case other = "something went wrong. Element cannot be found"
+        case captureUnknownElement = "the path cannot be end with a intermediate representer"
+        case attemptingEntriesOnArray = "cannot enumerate key-value pairs on array"
+        case attemptingArrayEnumerationOnObject = "cannot perform index based enumeration on object"
+        case other = "something went wrong. Target element cannot be found"
         
         /// Provide string representation of error.
         public func describe() -> String {
@@ -622,7 +624,7 @@ public class JSONEntity {
     }
     
     /// Returns the content data as [UInt8], map function parameter function optionally use to map the result with generic type.
-    public func toBytes<R>(_ mapFunction: ([UInt8]) -> R = {$0}) -> R {
+    public func bytes<R>(_ mapFunction: ([UInt8]) -> R = {$0}) -> R {
         return mapFunction(Array(jsonData))
     }
         
@@ -821,7 +823,7 @@ public class JSONEntity {
         public func parse() -> Any {
         if contentType == "object" || contentType == "array" {
             var iterator = jsonData.makeIterator()
-            return fowardToExtract(&iterator, firstCharacter: iterator.next()!).value.tree
+            return _getStructuredData(&iterator, firstCharacter: iterator.next()!).value.tree
         }
         return resolveValue(jsonText, jsonData, contentType)
     }
@@ -913,7 +915,7 @@ public class JSONEntity {
 
     }
     
-    private func fowardToExtract(_ iterator: inout UnsafeRawBufferPointer.Iterator, firstCharacter: UInt8) -> (value: ValueStore, type: String) {
+    private func _getStructuredData(_ iterator: inout UnsafeRawBufferPointer.Iterator, firstCharacter: UInt8) -> (value: ValueStore, type: String) {
         var stack: [CollectionHolder] = []
         var isInQuotes = false
         var grabbedKey = ""
@@ -1002,6 +1004,175 @@ public class JSONEntity {
         }
         return (ValueStore(parsedData: []), firstCharacter == 123 ? "object" : "array")
     }
+        
+    private func _grabData(_ copiedData: inout [UInt8], _ iterator: inout UnsafeRawBufferPointer.Iterator) {
+        var notationBalance = 1
+        var isQuotes = false
+        while true {
+            guard let char = iterator.next() else { break }
+            if char == 34 {
+                isQuotes = !isQuotes
+            }
+            if !isQuotes {
+                if char == 123 || char == 91 {
+                    notationBalance += 1
+                }
+                else if char == 125 || char == 93 {
+                    notationBalance -= 1
+                    if notationBalance == 0 {
+                        copiedData.append(char)
+                        return
+                    }
+                }
+            }
+            copiedData.append(char)
+        }
+    }
+    
+    private func _getObjectEntries(_ iterator: inout UnsafeRawBufferPointer.Iterator) -> [(key: String, value: JSONEntity)] {
+        var values: [(String, JSONEntity)] = []
+        var bytes: [UInt8] = []
+        var text: String = ""
+        var isGrabbing = false
+        var dataType = ""
+        var isQuotes = false
+        var possibleType = ""
+        var grabbedKey = ""
+        var isEscaping = false
+        var shouldGrabItem = false
+        while true {
+            guard let char = iterator.next() else { break }
+             if !isEscaping && char == 34 {
+                isQuotes = !isQuotes
+                if isQuotes {
+                    text = ""
+                    isGrabbing = true
+                    continue
+                } else {
+                    if shouldGrabItem {
+                        shouldGrabItem = false
+                        values.append((grabbedKey, JSONEntity(text, "string")))
+                    }
+                    isGrabbing = false
+                }
+            } else if !isQuotes {
+                if char == 123 || char == 91 {
+                    bytes = [char]
+                    dataType = char == 123 ? "object" : "array"
+                    _grabData(&bytes, &iterator)
+                    values.append((grabbedKey, JSONEntity(bytes, dataType)))
+                    shouldGrabItem = false
+                    continue
+                }
+                possibleType = ""
+                if shouldGrabItem {
+                     if (char >= 48 && char <= 57) || char == 45 {
+                        possibleType = "number"
+                    } else if char == 116 || char == 102 {
+                        possibleType = "boolean"
+                    } else if char == 110 {
+                        possibleType = "null"
+                    }
+                    
+                    if possibleType.count > 0 {
+                        shouldGrabItem = false
+                        text = ""
+                        isGrabbing = true
+                        dataType = possibleType
+                    }
+                } else if char == 44 && isGrabbing {
+                    values.append((grabbedKey, JSONEntity(_trimSpace(text), dataType)))
+                    isGrabbing = false
+                } else if char == 58 {
+                    shouldGrabItem = true
+                    grabbedKey = text
+                    continue
+                } else if char == 125 {
+                    if isGrabbing {
+                        values.append((grabbedKey, JSONEntity(_trimSpace(text), dataType)))
+                    }
+                    return values
+                }
+            }
+            if isGrabbing {
+                text.append(Character(UnicodeScalar(char)))
+            }
+            if isEscaping {
+                isEscaping = false
+            } else if char == 92 {
+                isEscaping = true
+            }
+        }
+        return values
+    }
+
+    
+    private func _getArrayValues(_ iterator: inout UnsafeRawBufferPointer.Iterator) -> [JSONEntity] {
+        var values: [JSONEntity] = []
+        var bytes: [UInt8] = []
+        var text: String = ""
+        var isGrabbing = false
+        var dataType = ""
+        var isQuotes = false
+        var possibleType = ""
+        var isEscaping = false
+        while true {
+            guard let char = iterator.next() else { break }
+            if !isEscaping && char == 34 {
+                isQuotes = !isQuotes
+                if isQuotes {
+                    text = ""
+                    isGrabbing = true
+                    continue
+                } else {
+                    values.append(JSONEntity(text, "string"))
+                    isGrabbing = false
+                }
+            } else if !isQuotes {
+                if char == 123 || char == 91 {
+                    bytes = [char]
+                    dataType = char == 123 ? "object" : "array"
+                    _grabData(&bytes, &iterator)
+                    values.append(JSONEntity(bytes, dataType))
+                    continue
+                }
+                possibleType = ""
+                if !isGrabbing {
+                    if (char >= 48 && char <= 57) || char == 45 {
+                        possibleType = "number"
+                    } else if char == 116 || char == 102 {
+                        possibleType = "boolean"
+                    } else if char == 110 {
+                        possibleType = "null"
+                    } else if char == 93 {
+                        return values
+                    }
+                    
+                    if possibleType.count > 0 {
+                        text = ""
+                        isGrabbing = true
+                        dataType = possibleType
+                    }
+                } else if char == 44 {
+                    values.append(JSONEntity(_trimSpace(text), dataType))
+                    isGrabbing = false
+                } else if char == 93 {
+                    values.append(JSONEntity(_trimSpace(text), dataType))
+                    return values
+                }
+                
+            }
+            if isGrabbing {
+                text.append(Character(UnicodeScalar(char)))
+            }
+            if isEscaping {
+                isEscaping = false
+            } else if char == 92 {
+                isEscaping = true
+            }
+        }
+        return values
+    }
     
     private func exploreData(_ inputPath:String, copyArrayData: Bool, copyObjectEntries: Bool
         ) -> (value: ValueStore, type: String)? {
@@ -1023,10 +1194,8 @@ public class JSONEntity {
         var grabbedBytes: [UInt8] = []
         var grabbingKey:[UInt8] = []
         var needProccessKey = false
-        var isGrabbingNotation = false
         var isGrabbingKey = false
         var isCountArray = false
-        var isGrabbingArrayValues = false
         
         var elementIndexCursor = -1 // the count variable when iterating array
         var pathArrayIndex = -1 // the array index of given on path
@@ -1035,15 +1204,12 @@ public class JSONEntity {
         var possibleType: String = ""
         var escapeCharacter: Bool = false
         
-        var arrayValues: [JSONEntity] = []
-        var objectEntries : [(key: String, value: JSONEntity)] = []
-
-        if paths.count == 0 {
+        if paths.count == 0 && !copyObjectEntries && !copyArrayData {
             errorInfo = (ErrorCode.emptyQueryPath, -1)
             return nil
         }
         if paths.last == intermediateSymbol {
-            errorInfo = (ErrorCode.unknownTargetOnQuery, paths.count - 1)
+            errorInfo = (ErrorCode.captureUnknownElement, paths.count - 1)
             return nil
         }
         var iterator = jsonData.makeIterator()
@@ -1053,18 +1219,9 @@ public class JSONEntity {
             if !isInQuotes {
                 if char == 123 || char == 91 {
                     notationBalance += 1
-                    if isCountArray && !isGrabbingArrayValues {
+                    if isCountArray {
                         // ignore processing if element in not matching the array index except when grabbing all elements on array
                         if elementIndexCursor != pathArrayIndex {
-
-                            // start grabbing array/object array elements on isGrabbingArrayValues mode
-                            if isGrabbingArrayValues {
-                                if notationBalance == advancedOffset + 2 {
-                                    grabbedBytes = []
-                                    grabbingDataType = char == 123 ? "object" : "array"
-                                }
-                                grabbedBytes.append(char)
-                            }
                             continue
                         }
                         // if element found for matched index stop array searching ..
@@ -1073,19 +1230,27 @@ public class JSONEntity {
                         isCountArray = false
                     }
                     // if the last value of last key is object or array then start copy it
-                    if (processedPathIndex == paths.count || isGrabbingArrayValues) && !isGrabbingNotation {
+                    if processedPathIndex == paths.count {
                         if extractInnerContent {
-                            return fowardToExtract(&iterator, firstCharacter: char)
+                            return _getStructuredData(&iterator, firstCharacter: char)
                         }
-                        grabbedBytes = []
-                        isGrabbingNotation = true
+                        if copyObjectEntries {
+                            if char == 123 {
+                                return (ValueStore(entriesData: _getObjectEntries(&iterator)), "CODE_ENTRIES")
+                            }
+                            errorInfo = (ErrorCode.attemptingEntriesOnArray, paths.count - 1)
+                                return nil
+                        } else if copyArrayData {
+                            if char == 91 {
+                                return (ValueStore(arrayData: _getArrayValues(&iterator)), "CODE_ARRAY")
+                            }
+                            errorInfo = (ErrorCode.attemptingArrayEnumerationOnObject, paths.count - 1)
+                            return nil
+                        }
+                        grabbedBytes = [char]
                         grabbingDataType = char == 123 ? "object" : "array"
-                    }
-                    
-                    // continue copying object/arrray inner characters...
-                    if isGrabbingNotation {
-                        grabbedBytes.append(char)
-                        continue
+                        _grabData(&grabbedBytes, &iterator)
+                        return (ValueStore(grabbedBytes), grabbingDataType)
                     }
                     
                     // intiate elements counting inside array on reaching open bracket...
@@ -1110,11 +1275,6 @@ public class JSONEntity {
                         pathArrayIndex = parsedIndex!
                         elementIndexCursor = 0
                         startSearchValue = true
-                        
-                        // start to copy all element of array given on last path index
-                        if copyArrayData && (processedPathIndex + 1) == paths.count {
-                            isGrabbingArrayValues = true
-                        }
                     } else {
                         // move to next nest object and start looking attribute key on next nested object...
                         startSearchValue = false
@@ -1129,29 +1289,11 @@ public class JSONEntity {
                 
                 if char == 125 || char == 93 {
                     notationBalance -= 1
-                    
-                    // if a primitive value is in proccess copying then return copied value
-                    if isGrabbingText {
-                        // when finished copy last primitive value on copyObjectEntries mode. Need to make sure the parent container notation is an object
-                        if copyObjectEntries && char == 125 {
-                            objectEntries.append((_asString(grabbingKey), JSONEntity(_trimSpace(grabbedText), grabbingDataType)))
-                            return (ValueStore(entriesData: objectEntries), "CODE_ENTRIES")
-                        } else if isGrabbingArrayValues {
-                            // append the pending grabbing text
-                            arrayValues.append(JSONEntity(_trimSpace(grabbedText), grabbingDataType))
-                        } else {
-                            return (ValueStore(_trimSpace(grabbedText)), grabbingDataType)
-                        }
-                    }
-                    if isGrabbingNotation {
-                        grabbedBytes.append(char)
-                    }
-                    
                     // occur after all element in foccused array or object is finished searching...
                     if notationBalance == advancedOffset {
                         if isCountArray && char == 93 {
                             // occur when when not matching element is found for given array index and array finished iterating...
-                            if tranversalHistory.count != 0 && !(isGrabbingArrayValues && (processedPathIndex + 1) == paths.count){
+                            if tranversalHistory.count != 0 {
                                 if tranversalHistory.count != 1 {
                                     tranversalHistory.removeLast()
                                     paths.insert(intermediateSymbol, at: processedPathIndex)
@@ -1161,16 +1303,13 @@ public class JSONEntity {
                                 isCountArray = false
                                 continue
                             }
-                            if isGrabbingArrayValues {
-                                return (ValueStore(arrayData: arrayValues), "CODE_ARRAY")
-                            }
                             errorInfo = (ErrorCode.arrayIndexNotFound, paths.count - 1)
                             return nil
                         }
                         
                         // exit occur after no matching key is found in object
-                        if char == 125 && !isGrabbingNotation {
-                            if tranversalHistory.count != 0 && !(copyObjectEntries && (processedPathIndex + 1) == paths.count) {
+                        if char == 125 {
+                            if tranversalHistory.count != 0 {
                                 if tranversalHistory.count != 1 {
                                     tranversalHistory.removeLast()
                                     paths.insert(intermediateSymbol, at: processedPathIndex)
@@ -1179,74 +1318,37 @@ public class JSONEntity {
                                 isNavigatingUnknownPath = true
                                 continue
                             }
-                            if copyObjectEntries && (paths.count - 1) == processedPathIndex { return (ValueStore(entriesData: objectEntries), "CODE_ENTRIES") }
                             errorInfo = (ErrorCode.objectKeyNotFound, paths.count - 1)
                             return nil
                         }
                         
-                        // copy json object/array data upon reading last path index
-                        if processedPathIndex == paths.count {
-                            if !copyObjectEntries { return (ValueStore(grabbedBytes), grabbingDataType) }
-                            objectEntries.append((_asString(grabbingKey), JSONEntity(grabbedBytes, grabbingDataType)))
-                            startSearchValue = false
-                            isGrabbingNotation = false
-                            processedPathIndex -= 1
-                            advancedOffset -= 1
-                        }
                     }
                     
-                    if isGrabbingArrayValues {
-                        // append after finishing copy single array/object element inside array during isGrabbingArrayValues mode
-                        if isGrabbingNotation && notationBalance == (advancedOffset + 1) {
-                            arrayValues.append(JSONEntity(grabbedBytes, grabbingDataType))
-                            isGrabbingNotation = false
-                        }
-                    }
                     continue
                 }
             }
             
             // ======== FINISHED HALDING JSON OPEN AND CLOSE NOTATION ==========
-            if isGrabbingNotation {
-                if !escapeCharacter && char == 34 {
-                    isInQuotes = !isInQuotes
-                }
-                grabbedBytes.append(char)
-            } else if startSearchValue {
+            if startSearchValue {
                 if notationBalance == advancedOffset || (isCountArray && (advancedOffset + 1) == notationBalance) {
                     // ====== HANDLING GRABBING STRINGS =========
                     // ignore escaped double quotation characters inside string values...
                     if !escapeCharacter && char == 34 {
                         isInQuotes = !isInQuotes
-                        // array index matching does not apply on isGrabbingArrayValues as need to proccess all elements in the array
-                        if isCountArray && !isGrabbingArrayValues && elementIndexCursor != pathArrayIndex {
+                        if isCountArray && elementIndexCursor != pathArrayIndex {
                             if isInQuotes {
                                 grabbingDataType = "string"
                             }
                             continue
                         }
                         // if not the last proccesed value skip caturing value
-                        if !isGrabbingArrayValues &&
-                         (processedPathIndex + (isCountArray ? 1 : 0)) != paths.count {
+                        if (processedPathIndex + (isCountArray ? 1 : 0)) != paths.count {
                             errorInfo = (ErrorCode.nonNestedParent, processedPathIndex - 1)
                             return nil
                         }
                         isGrabbingText = !isGrabbingText
                         if !isGrabbingText {
-                            if !copyObjectEntries {
-                                if isGrabbingArrayValues {
-                                    arrayValues.append(JSONEntity(grabbedText, grabbingDataType))
-                                    grabbedText = ""
-                                    continue
-                                }
-                                return (ValueStore(grabbedText), "string")
-                            }
-                            // appending string elements to entries
-                            // processedPathIndex is decrement to stop stimulation the overal stimulation is over
-                            objectEntries.append((_asString(grabbingKey), JSONEntity(grabbedText, "string")))
-                            startSearchValue = false
-                            processedPathIndex -= 1
-                            advancedOffset -= 1
+                            return (ValueStore(grabbedText), "string")
                         } else {
                             grabbingDataType = "string"
                             grabbedText = ""
@@ -1264,14 +1366,23 @@ public class JSONEntity {
                             else if char == 110 { possibleType = "null" }
                             if possibleType != "" {
                                 grabbingDataType = possibleType
-                                if isCountArray && !isGrabbingArrayValues && elementIndexCursor != pathArrayIndex { continue }
-                                if !isGrabbingArrayValues && (processedPathIndex + (isCountArray ? 1 : 0)) != paths.count {
+                                if isCountArray && elementIndexCursor != pathArrayIndex { continue }
+                                if (processedPathIndex + (isCountArray ? 1 : 0)) != paths.count {
                                     errorInfo = (ErrorCode.nonNestedParent, processedPathIndex - 1)
                                     return nil
                                 }
                                 grabbedText = ""
                                 grabbedText.append(Character(UnicodeScalar(char)))
                                 isGrabbingText = true
+                                
+                                while true {
+                                    guard let char2 = iterator.next() else { break }
+                                    if char2 == 44 || char2 == 125 || char == 93 {
+                                        return (ValueStore(_trimSpace(grabbedText)), grabbingDataType)
+                                    } else {
+                                        grabbedText.append(Character(UnicodeScalar(char2)))
+                                    }
+                                }
                                 continue
                             } else if char == 44 && isCountArray {
                                 elementIndexCursor += 1
@@ -1281,22 +1392,8 @@ public class JSONEntity {
                             if isCountArray {
                                 elementIndexCursor += 1
                             }
-                            if copyObjectEntries {
-                                objectEntries.append((_asString(grabbingKey), JSONEntity(_trimSpace(grabbedText), grabbingDataType)))
-                                startSearchValue = false
-                                isGrabbingText = false
-                                processedPathIndex -= 1
-                                advancedOffset -= 1
-                            } else  {
-                                // the below block need to require to copy terminate primitive values and append on meeting ',' terminator...
-                                if isGrabbingArrayValues {
-                                    arrayValues.append(JSONEntity(_trimSpace(grabbedText), grabbingDataType))
-                                    isGrabbingText = false
-                                    grabbedText = ""
-                                    continue
-                                }
-                                return (ValueStore(_trimSpace(grabbedText)), grabbingDataType)
-                            }
+                            // the below block need to require to copy terminate primitive values and append on meeting ',' terminator...
+                            return (ValueStore(_trimSpace(grabbedText)), grabbingDataType)
                         } else if isGrabbingText {
                             grabbedText.append(Character(UnicodeScalar(char)))
                         }
@@ -1323,7 +1420,7 @@ public class JSONEntity {
                 } else if needProccessKey && char == 58 {
                     needProccessKey = false
                     // if found start searching for object value for object key
-                    if (copyObjectEntries && (processedPathIndex + 1) == paths.count) || grabbingKey == paths[processedPathIndex] {
+                    if grabbingKey == paths[processedPathIndex] {
                         processedPathIndex += 1
                         advancedOffset += 1
                         startSearchValue = true
