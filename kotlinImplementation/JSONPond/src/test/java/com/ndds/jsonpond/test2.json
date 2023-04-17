@@ -1,0 +1,92 @@
+{
+   "root": {
+      "another": [
+         34,
+         {
+            "waking": ["good morning", null, -2.34, 45, false],
+            "day": 24,
+            "dota": "temper\\\"ature",
+            "temperature": 56,
+            "moredetails": {
+               "ahago": "{he\"llo}",
+               "{temperature}": 87,
+               "day\"": 52,
+               "someList": [47],
+               "dali": true
+            },
+            "location": {
+               "district": "southern province",
+               "place": "Galle",
+               "meta": {
+                   "lamo": 45.65
+               }
+            }
+         }
+      ],
+      "other": [
+          55,
+          {
+              "location": {
+                  
+                  "meta": {
+                      "point": 32
+                  }
+              },
+              "dat": 57
+          },
+          null
+      ],
+      "geologicalInformation": {
+         "anotherAttribute": {
+             "hello there": "speciesType"
+         },
+         "speciesType": ["flower", "naruto"],
+         "recipents": "bees",
+         "consumers": [
+            "king-fisher",
+            "magapie",
+            "cats"
+         ],
+         "predator": {
+            "mindSummary": {
+               "info": "eager and playful and sometimes very bored and require sleep"
+            },
+            "anatomy": "big eyes with tail"
+         }
+      },
+      "creditaInfo": {
+         "futurePlans": [
+            [
+               {
+                  "geoSpeare": "enwrapped the sun with materials from asteroid to extract energery",
+                  "small": "value"
+               },
+               "cosmos technology",
+               45,
+               {"note": "hello world"}
+            ],
+            {
+               "research": {
+                  "feasibilty": "reverse e=mc2 to convert energy to mass",
+                  "brand": "OpenMind",
+                  "typo": null
+               }
+            }
+         ]
+      },
+      "refInfo": {
+         "condition": "stable-good",
+         "weather": "stable and cloudy",
+         "expectedWeather": "rain",
+         "music": "Deep chills",
+         "music details": {
+            "lyrics": "Its all in the way and say my name",
+            "listenedOn": "24/02/2022",
+            "recomendedTags": [
+               "chills",
+               "programming music"
+            ]
+         }
+      }
+   }
+}
