@@ -17,8 +17,8 @@
             "request": "launch",
             "name": "test",
             "program": "/Applications/Xcode.app/Contents/Developer/usr/bin/xctest",
-            "args": [".build/debug/JSONStoreTests.xctest"],
-            "cwd": "${workspaceFolder:JSONStore}",
+            "args": [".build/debug/WaterJSONTests.xctest"],
+            "cwd": "${workspaceFolder:WaterJSON}",
             "preLaunchTask": "swift: Build All"
           }
     ]

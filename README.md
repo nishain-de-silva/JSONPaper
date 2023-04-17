@@ -1,12 +1,12 @@
 <img src="logo.png" alt="drawing" style="width:100px;"/>
 
-# JSONStore (v2.6) :rocket:
+# JSONPaper (v2.6) :rocket:
 
-Swift, is a type of constrained language right? One way of parsing JSON is to parse JSON string to a known `Codable` JSON structure. In Swift 3 you can use `JSONSerialization` but still, you have to chain deserialization calls and it would be a mess when you have to check the existence of attributes or array values before reading or when handling any complex read queries. Also, there are times when the expected JSON structure also can have dynamic in a certain scenario, and would be messy to check the existence of value all the time. JSONStore help you to parse JSON in any free form and extract value without constraining it into a fixed type. This is a pure zero dependency `Swift` package with the technique of `Read Only Need Content` in a single read cycle and which means no byte is read twice! which is why this library is really fast.
+Swift, is a type of constrained language right? One way of parsing JSON is to parse JSON string to a known `Codable` JSON structure. In Swift 3 you can use `JSONSerialization` but still, you have to chain deserialization calls and it would be a mess when you have to check the existence of attributes or array values before reading or when handling any complex read queries. Also, there are times when the expected JSON structure also can have dynamic in a certain scenario, and would be messy to check the existence of value all the time. JSONPaper help you to parse JSON in any free form and extract value without constraining it into a fixed type. This is a pure zero dependency `Swift` package with the technique of `Read Only Need Content` in a single read cycle and which means no byte is read twice! which is why this library is really fast.
 
 ## Installation
 
-You can use `Swift Package Manager` to Install `JSONStore` from this repository URL. Thats it!
+You can use `Swift Package Manager` to Install `JSONPaper` from this repository URL. Thats it!
 
 ## Usage
 
@@ -14,7 +14,7 @@ You can use `Swift Package Manager` to Install `JSONStore` from this repository 
 > The library does `not` handle or validate incorrect `JSON` format in preference for performance. Please make sure to handle and validate JSON in such cases or otherwise would give you incorrect or unexpected any(s). JSON content must be decodable in `UTF` format (Best tested in `UTF-8` format).
 ## Initializing
 
-There are a handful of ways to initialize JSONStore. You can initialize by `string` or from the `Data` instance. Initializing from `Data` is a bit trickier as JSONStore does not use `Foundation` so it cannot resolve the `Data` type. Hence you have to provide the `UnsafeRawBufferPointer` instance instead. You can also provide a function that requires map callback (eg: `Data.withUnsafeBytes` as constructor parameter _(see [withUnsafeBytes](https://developer.apple.com/documentation/swift/array/withunsafebytes(_:)) to learn about such callbacks)_.
+There are a handful of ways to initialize JSONPaper. You can initialize by `string` or from the `Data` instance. Initializing from `Data` is a bit trickier as JSONPaper does not use `Foundation` so it cannot resolve the `Data` type. Hence you have to provide the `UnsafeRawBufferPointer` instance instead. You can also provide a function that requires map callback (eg: `Data.withUnsafeBytes` as constructor parameter _(see [withUnsafeBytes](https://developer.apple.com/documentation/swift/array/withunsafebytes(_:)) to learn about such callbacks)_.
 
 ```swift
 // with string ...
@@ -36,7 +36,7 @@ let json = JSONEntity(bufferPointer)
 # Reading Data
 To access an attribute or element you can provide a simple `String` path separated by dot (**`.`**) notation (or by another custom character with `splitQuery(Character:)`).
 ```swift
-import JSONStore
+import JSONPaper
 
 let jsonText = String(data: apiDataBytes, encoding: .utf8)
 
@@ -64,13 +64,13 @@ In all query methods if the key / indexed item does not exist in the given path 
 
 **Example**:
 ```swift
-let jsonStore = JSONEntity(jsonText)
+let JSONPaper = JSONEntity(jsonText)
 
-jsonStore.number("people.2.details.age") // return age
+JSONPaper.number("people.2.details.age") // return age
 
-jsonStore.number("people.2.wrongKey.details.age") // return nil
+JSONPaper.number("people.2.wrongKey.details.age") // return nil
 
-jsonStore.number("people.2.details.name") // return nil since name is not a number
+JSONPaper.number("people.2.details.name") // return nil since name is not a number
 ```
 
 To check if a value is `null` use the `isNull()` method. Don't assume `nil` as `null` as it could be also that value you expect does not exist at all. Instead, you can use `isNull` which returns a `boolean` if the value is actually `null`.
@@ -129,12 +129,12 @@ but in another scenario, you have to access age property like this,
 let path = "root.profile.personalInfo.age"
 ```
 This may occur when the application server may provide a different `JSON` structure on the same `API` call due to different environmental parameters (like user credentials role).
-While it is possible to check the existence of intermediate properties conditionally there is a handy way JSONStore use to solve this problem easily.
+While it is possible to check the existence of intermediate properties conditionally there is a handy way JSONPaper use to solve this problem easily.
 ```swift
 let path = "root.???.age"
 ```
 The `???` token is an `intermediate representer` to represent generic **zero or more** intermediate paths which can be either **object key** or **array index**.
-You can customize the `intermediate representer` token with another string with `setIntermediateRepresentor` with another custom string - the default token string is `???` (In case one of the object attributes also happen to be named `???` !).
+You can customize the `intermediate representer` token with another string with `setIntermediateRepresent` with another custom string - the default token string is `???` (In case one of the object attributes also happen to be named `???` !).
 
 You can also use multiple `intermediate representer` tokens like this,
 ```swift
@@ -170,7 +170,7 @@ type  | output
 .boolean | `true` or `false`
 .object | JSONEntity
 .array | [JSONEntity]
-.null | `JSONStore.Constants.NULL`
+.null | `JSONPaper.Constants.NULL`
 
 you could additionally use `type()` to get the data type of the current JSON `reference`.
 
@@ -178,10 +178,10 @@ you could additionally use `type()` to get the data type of the current JSON `re
 
 Sometimes you may need to write the results on a `serializable` destination such as an in-device cache where you have to omit the usage of class instances and unwarp its actual value. You can use `parse()` for this, `array` and `object` will be converted to `array` and `dictionary` recursively until reaching primitive values of boolean, numbers, and null.
 
-_Remember `null` is represented by `JSONStore.Constants.NULL`. This is to avoid optional wrapping._
+_Remember `null` is represented by `JSONPaper.Constants.NULL`. This is to avoid optional wrapping._
 
 # Writing Data
-JSONStore now supports the entire CRUD functionality. For write operations, there are 4 functions.
+JSONPaper now supports the entire CRUD functionality. For write operations, there are 4 functions.
 - `delete()`
 - `update()`
 - `insert()`
@@ -205,9 +205,9 @@ JSONEntity.write([
 ]) // see easy peasy...
 
 ```
-> JSONStore has a global constant with the name `null` as an alias for the enum `Constants.NULL` you can use that as well!
+> JSONPaper has a global constant with the name `Null` as an alias for the enum `Constants.NULL` you can use that as well!
 
-Write functions made it easy to return the instance that has been written you continue the rest of the work in the chain. When a write function failed JSONStore would provide an error message to find out where in the query did write function specifically failed.
+Write functions made it easy to return the instance that has been written you continue the rest of the work in the chain. When a write function failed JSONPaper would provide an error message to find out where in the query did write function specifically failed.
 
 The `insert()` function is used for both adding key attributes for objects as well as appending items to the array. If you set a new attribute or indexed value for an object or array respectively then your path should be:
 ```swift
@@ -264,21 +264,21 @@ let response: Data = entity.update("members.2.location.home", "24/5 backstreet m
 
 ## Capturing references
 
-`take()` is used to capture the `JSONEntity` reference of the given path. You can query values in 2 ways:
+`capture()` is used to capture the `JSONEntity` reference of the given path. You can query values in 2 ways:
 
 ```swift
 let value = reference.string(attributePath)!
 // or
-let value = reference.take(attributePath)?.string()
+let value = reference.capture(attributePath)?.string()
 // both give the same result
 ```
 
 ## Error Listeners
 
-JSONStore also allows adding a fail listener before calling a read or write a query to catch possible errors. Error callback gives you a tuple consisting of 2 values: 
+JSONPaper also allows adding a fail listener before calling a read or write a query to catch possible errors. Error callback gives you a tuple consisting of 2 values: 
 - The error code
 - Index of the query fragment where the issue has been detected from the query path.
-In the below example if the field `name` is actually a `string` instead of a nested `object` then JSONStore will give you an error
+In the below example if the field `name` is actually a `string` instead of a nested `object` then JSONPaper will give you an error
 
 ```swift
 let result = entity
