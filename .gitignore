@@ -1,9 +1,15 @@
 .DS_Store
 /.build
+build
+.idea
 /Packages
+gradle
 /*.xcodeproj
 xcuserdata/
 DerivedData/
 .swiftpm/config/registries.json
 .swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
 .netrc
+local.properties
+.gradle
+src/test/swift/large-file.json

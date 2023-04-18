@@ -20,10 +20,13 @@ let package = Package(
         // Targets can depend on other targets in this package, and on products in packages this package depends on.
         .target(
             name: "JSONPond",
-            dependencies: []),
+            dependencies: [],
+            path: "src/main/swift"
+        ),
         .testTarget(
             name: "JSONPondTests",
             dependencies: ["JSONPond"],
+            path: "src/test/swift",
             resources: [.process("test2.json"), .process("large-file.json")]
         ),
     ]

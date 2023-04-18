@@ -5,6 +5,12 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "type": "java",
+            "name": "Launch Java Program",
+            "request": "launch",
+            "mainClass": ""
+        },
+        {
             "type": "lldb",
             "request": "launch",
             "name": "Debug",
@@ -17,9 +23,10 @@
             "request": "launch",
             "name": "test",
             "program": "/Applications/Xcode.app/Contents/Developer/usr/bin/xctest",
-            "args": [".build/debug/WaterJSONTests.xctest"],
-            "cwd": "${workspaceFolder:WaterJSON}",
+            "args": [".build/debug/JSONPond.xctest"],
+            "cwd": "${workspaceFolder:JSONPond}",
             "preLaunchTask": "swift: Build All"
-          }
+          },
+
     ]
 }
