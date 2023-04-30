@@ -2,34 +2,33 @@
    "root": {
       "another": [
          34,
+         true,
          {
-            "waking": ["good morning", null, -2.34, +45, false],
+            "sample": [     ],
+            "waking": "['good morning nishain', null, -2.34, +45, false]",
+            "meta": {
+               "point": "test"
+            },
             "day": 24,
             "dota": "temper\\\"ature",
             "temperature": 56,
             "moredetails": {
                "ahago": "{he\"llo}",
-               "{temperature}": 87,
+               "{temperature}": "some world",
                "day\"": 52,
-               "someList": [47]
+               "someList": [47],
                "dali": true
             },
-            "location": {
-               "district": "southern province",
-               "place": "Galle",
-               "meta": {
-                   "lamo": 45.65
-               }
-            }
+            "location": "{'district':'southernprovince','ZamPle-I45d':250,'place':'Galle','meta':{'point':55.23}}"
          }
       ],
       "other": [
           55,
-          "samples",
           {
               "location": {
-                  
+
                   "meta": {
+                      "lamo": 45.65,
                       "point": 32
                   }
               },

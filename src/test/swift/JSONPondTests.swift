@@ -29,20 +29,23 @@ final class JSONPondTest: XCTestCase {
         do {
             let jsonData = try Data(contentsOf: URL(fileURLWithPath: path!))
             let start = Date()
-//            let result = jsonpond.write([
-//                "name": [
-//                    "first": "nishin",
-//                    "last": "de silva"
-//                ],
-//                "age": 23,
-//                "hobbies": ["first", "second", []]
-//            ]).onQueryFail({
-//                print($0.error.describe(), $0.querySegmentIndex)
-//
-//            })
-            
-            let pond = jsonpond(jsonData.withUnsafeBytes)
-            print(pond.any("???.waking")?.value)
+//            let dummy = JSONBlock.write([
+//                 "name": [
+//                     "first": "nishin",
+//                     "last": "de silva"
+//                 ],
+//                 "others": nil,
+//                 "age": 23,
+//                 "hobbies": ["first", nil, "second", []]
+//             ])
+//            print(dummy.type(), dummy.parse())
+            let result = JSONBlock(jsonData.withUnsafeBytes)
+                .onQueryFail({
+                    print($0.errorCode.describe(), $0.failedIndex)
+                })
+                .capture("root.another.???.temperature")!
+                .objectEntry(nil, ignoreType: true)?.parse()
+            print(result)
             print("elapsed time - ", Date().timeIntervalSince(start))
         } catch {
             print(error)

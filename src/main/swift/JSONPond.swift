@@ -1,10 +1,7 @@
-/// jsonpond represenentation of Null
+/// JSONBlock representation of Null
 public enum Constants {
     case NULL
 }
-
-/// jsonpond represenentation of Null
-public let Null = Constants.NULL
 
 public enum JSONType: String {
     case string = "string"
@@ -19,9 +16,27 @@ public enum JSONType: String {
     }
 }
 
-public class jsonpond {
-    private static let INVALID_START_CHARACTER_ERROR = "[jsonpond] the first character of given json content is neither starts with '{' or '['. Make sure the given content is valid JSON"
-    private static let INVALID_BUFFER_INITIALIZATION = "[jsonpond] instance has not properly initialized. Problem had occured when assigning input data buffer which occur when the provider callback given on .init(provider:) gives nil or when exception thrown within provider callback itself. Check the result given by by provider callback to resolve the issue."
+public class JSONBlock {
+    public class JSONChild : JSONBlock {
+        /// Name attribute of this element in the parent object.
+        public var key = ""
+        
+        /// Index of this element in the parent array.
+        public var index = -1
+        
+        fileprivate func setKey(_ newKey: String) -> JSONChild {
+            key = newKey
+            return self
+        }
+        
+        fileprivate func setIndex(_ newIndex: Int) -> JSONChild {
+            index = newIndex
+            return self
+        }
+    }
+    
+    private static let INVALID_START_CHARACTER_ERROR = "[JSONPond] the first character of given json content is neither starts with '{' or '['. Make sure the given content is valid JSON"
+    private static let INVALID_BUFFER_INITIALIZATION = "[JSONPond] instance has not properly initialized. Problem had occured when assigning input data buffer which occur when the provider callback given on .init(provider:) gives nil or when exception thrown within provider callback itself. Check the result given by by provider callback to resolve the issue."
     
     private var jsonText: String = ""
     private var jsonData: UnsafeRawBufferPointer = UnsafeRawBufferPointer.init(start: nil, count: 0)
@@ -33,67 +48,38 @@ public class jsonpond {
     private var errorInfo: (code: ErrorCode, occurredQueryIndex: Int)? = nil
     private var pathSpliter: Character = "."
     private var typeMismatchWarningCount = 0
-    private var stringQuotationDelimter: QuotationDelimiter = .singleQuotation
-    
-    /// Name attribute of this element in the parent object.
-    public var key = ""
-    
-    /// Index of this element in the parent array.
-    public var index = -1
-    
-    
-    private func setKey(_ newKey: String) -> jsonpond {
-        key = newKey
-        return self
-    }
-    
-    private func setIndex(_ newIndex: Int) -> jsonpond {
-        index = newIndex
-        return self
-    }
+    private var QUOTATION: UInt8 = 34
     
     private class ValueStore {
-        var string: String
-        var bytes: UnsafeRawBufferPointer
+        var string: String = ""
         var memoryHolder: [UInt8] = []
         
-        var array: [jsonpond]
-        var tree: Any
+        var array: [JSONBlock] = []
+        var children: [JSONChild] = []
+        var tree: Any = []
         
         init(_ input: String) {
             string = input
-            bytes = UnsafeRawBufferPointer(start: nil, count: 0)
-            array = []
-            tree = []
         }
         
         init(_ data: [UInt8]) {
             memoryHolder = data
-            bytes = memoryHolder.withUnsafeBytes({$0})
-            string = ""
-            array = []
-            tree = []
-            
         }
         
-        init(_ text: String, _ data: UnsafeRawBufferPointer) {
+        init(_ text: String, _ data: [UInt8]) {
             string = text
-            bytes = data
-            array = []
-            tree = []
+            memoryHolder = data
         }
         
-        init(arrayData: [jsonpond]) {
-            string = ""
-            bytes = UnsafeRawBufferPointer(start: nil, count: 0)
+        init(arrayData: [JSONBlock]) {
             array = arrayData
-            tree = []
+        }
+        
+        init(childData: [JSONChild]) {
+            children = childData
         }
         
         init(parsedData: Any) {
-            string = ""
-            bytes = UnsafeRawBufferPointer(start: nil, count: 0)
-            array = []
             tree = parsedData
         }
     }
@@ -105,10 +91,11 @@ public class jsonpond {
         case "{": contentType = "object"
         case "[": contentType = "array"
         default:
-            print(jsonpond.INVALID_START_CHARACTER_ERROR)
+            print(JSONBlock.INVALID_START_CHARACTER_ERROR)
             contentType = "string"
         }
         jsonData = UnsafeRawBufferPointer(start: jsonText.withUTF8({$0}).baseAddress, count: jsonText.count)
+        identifyStringDelimter(jsonString)
     }
     
     /// Provide buffer pointer to the JSON content bytes.
@@ -118,7 +105,7 @@ public class jsonpond {
         case 123: contentType = "object"
         case 91: contentType = "array"
         default:
-            print(jsonpond.INVALID_START_CHARACTER_ERROR)
+            print(JSONBlock.INVALID_START_CHARACTER_ERROR)
             contentType = "string"
         }
     }
@@ -126,7 +113,7 @@ public class jsonpond {
     /// Provide mirror callback to recieve UnsafeRawBufferPointer instance.
     public init(_ provider:  ((UnsafeRawBufferPointer?) throws -> UnsafeRawBufferPointer?) throws -> UnsafeRawBufferPointer?) {
         guard let buffer = try? provider({$0}) else {
-            print(jsonpond.INVALID_BUFFER_INITIALIZATION)
+            print(JSONBlock.INVALID_BUFFER_INITIALIZATION)
             contentType = "string"
             return
         }
@@ -135,15 +122,15 @@ public class jsonpond {
         case 123: contentType = "object"
         case 91: contentType = "array"
         default:
-            print(jsonpond.INVALID_START_CHARACTER_ERROR)
+            print(JSONBlock.INVALID_START_CHARACTER_ERROR)
             contentType = "string"
         }
     }
     
-    /// Provide mirror callback to recieve UnsafeRawBufferPointer instance.
+    /// Provide mirror callback to receive UnsafeRawBufferPointer instance.
     public init(_ provider:  ((UnsafeRawBufferPointer?)  -> UnsafeRawBufferPointer?) -> UnsafeRawBufferPointer?) {
         guard let buffer = provider({$0}) else {
-            print(jsonpond.INVALID_BUFFER_INITIALIZATION)
+            print(JSONBlock.INVALID_BUFFER_INITIALIZATION)
             contentType = "string"
             return
         }
@@ -152,61 +139,53 @@ public class jsonpond {
         case 123: contentType = "object"
         case 91: contentType = "array"
         default:
-            print(jsonpond.INVALID_START_CHARACTER_ERROR)
+            print(JSONBlock.INVALID_START_CHARACTER_ERROR)
             contentType = "string"
         }
     }
     
-    // ======= PRIVATE INTITIALIZERS =====
-    private init(_ json: String, _ type: String) {
+    // ======= PRIVATE INITIALIZERS =====
+    fileprivate init(_ json: String, _ type: String) {
         jsonText = json
         contentType = type
         if contentType == "object" {
+            identifyStringDelimter(json)
             jsonData = UnsafeRawBufferPointer(start: jsonText.withUTF8({$0}).baseAddress, count: jsonText.count)
         }
     }
     
     
-    private init(_ json: [UInt8], _ type: String) {
+    fileprivate init(_ json: [UInt8], _ type: String) {
         jsonDataMemoryHolder = json
         jsonText = ""
         contentType = type
         jsonData = jsonDataMemoryHolder.withUnsafeBytes({$0})
     }
     
-    private init(_ json: UnsafeRawBufferPointer, _ type: String) {
-        jsonText = ""
-        contentType = type
-        jsonData = json
-    }
     
     /// Set token to represent intermediate paths.
     /// Intermediate token capture zero or more dynamic intermediate paths. Default token is ???.
-    public func setIntermediateRepresent (_ representer: String) -> jsonpond {
+    public func setIntermediateToken (_ representer: String) -> JSONBlock {
         if Int(representer) != nil {
-            print("[jsonpond] intermediate represent strictly cannot be a number!")
+            print("[JSONPond] intermediate represent strictly cannot be a number!")
             return self
         }
         intermediateSymbol = Array(representer.utf8)
         return self
     }
 
-    /// Tempolary make the next query string to be split by the character given. Useful in case of encountering object attribute containing dot notation in their names.
-    public func splitQuery(by: Character) -> jsonpond {
+    /// Temporary make the next query string to be split by the character given. Useful in case of encountering object attribute containing dot notation in their names.
+    public func splitQuery(by: Character) -> JSONBlock {
         pathSpliter = by
         return self
     }
     
-    public func terminateNestedString(by: QuotationDelimiter) -> jsonpond {
-        stringQuotationDelimter = by
-        return self
-    }
     
-    private func getField <T>(_ path: String?, _ fieldName: String, _ mapper: (ValueStore) -> T?, ignoreType:Bool = false) -> T? {
-        guard let (data, type) = path == nil ? (ValueStore(jsonText, jsonData), contentType) : decodeData(path!) else { return nil; }
-        if !ignoreType && type != fieldName {
+    private func getField <T>(_ path: String?, _ fieldName: String, _ mapper: (ValueStore) -> T?, ignoreType:Bool = false, similarKeyMatch: Bool) -> T? {
+        guard let (data, type) = path == nil ? (ValueStore(jsonText, jsonDataMemoryHolder), contentType) : decodeData(path!, ignoreCaseAndSpecialCharacters: similarKeyMatch) else { return nil; }
+        if (!ignoreType && type != fieldName) || (ignoreType && type != fieldName && type != "string") {
             if typeMismatchWarningCount != 3 {
-                print("[jsonpond] type constrained query expected \(fieldName) but \(type) type value was read instead therefore returned nil. This warning will not be shown after 3 times per instance")
+                print("[JSONPond] type constrained query expected \(fieldName) but \(type) type value was read instead therefore returned nil. This warning will not be shown after 3 times per instance")
                 typeMismatchWarningCount += 1
             }
             return nil
@@ -215,68 +194,83 @@ public class jsonpond {
     }
     
     /// Get string value in the given path.
-    public func string(_ path:String? = nil) -> String? {
-        return getField(path, "string", { $0.string })
+    public func string(_ path: String? = nil, similarKeyMatch: Bool = false) -> String? {
+        return getField(path, "string", { $0.string }, similarKeyMatch: similarKeyMatch)
     }
     
     /// Get number value in the given path. Note that double instance is given even if
     /// number is a whole integer type number.
-    public func number(_ path:String? = nil, ignoreType: Bool = false) -> Double? {
-        return getField(path, "number", { Double($0.string) }, ignoreType: ignoreType)
+    public func number(_ path:String? = nil, ignoreType: Bool = false, similarKeyMatch: Bool = false) -> Double? {
+        return getField(path, "number", { Double($0.string) }, ignoreType: ignoreType, similarKeyMatch: similarKeyMatch)
     }
     
     /// Check if the element in the given addressed path represent a null value.
-    public func isNull(_ path:String? = nil) -> Bool? {
-        guard let type = path == nil ? contentType: decodeData(path!)?.type else {
+    public func isNull(_ path:String? = nil, similarKeyMatch: Bool = false) -> Bool? {
+        guard let type = path == nil ? contentType: decodeData(path!, ignoreCaseAndSpecialCharacters: similarKeyMatch)?.type else {
             return nil
         }
         return type == "null"
     }
     
     /// Get object in the given path. Activate ignoreType to parse string as json object.
-    public func object(_ path:String? = nil, ignoreType: Bool = false) -> jsonpond? {
-        if path == nil { return self }
+    public func objectEntry(_ path:String? = nil, ignoreType: Bool = false, similarKeyMatch: Bool = false) -> JSONBlock? {
+        if path == nil {
+            if contentType == "object" {
+                return self
+            } else if ignoreType && contentType == "string" {
+                return JSONBlock(jsonText, "object")
+            }
+            print("[JSONPond] The content of this instance is not object type but \(contentType) type instead so nil is given.")
+            return nil
+        }
         return getField(path, "object", {
-            ignoreType ? jsonpond(replaceEscapedQuotations($0.string), "object") : jsonpond($0.memoryHolder, "object")
-        }, ignoreType: ignoreType)
+            // have to make sure value is string and not bytes...
+            if ignoreType && $0.memoryHolder.count == 0 {
+                return JSONBlock($0.string, "object")
+            }
+            return JSONBlock($0.memoryHolder, "object")
+        }, ignoreType: ignoreType, similarKeyMatch: similarKeyMatch)
     }
     
     /// Get boolean value in the given path.
-    public func bool(_ path: String? = nil, ignoreType: Bool = false) -> Bool? {
-        return getField(path, "boolean", { $0.string == "true" }, ignoreType: ignoreType)
+    public func bool(_ path: String? = nil, ignoreType: Bool = false, similarKeyMatch: Bool = false) -> Bool? {
+        return getField(path, "boolean", { $0.string == "true" }, ignoreType: ignoreType, similarKeyMatch: similarKeyMatch)
     }
     
     
-    /// Get collection of items either from array or object
-    public func collection(_ path: String? = nil, ignoreType: Bool = false) -> [jsonpond]? {
-        if ignoreType {
-            guard let content = getField(path, "string", {
-                replaceEscapedQuotations($0.string)
-            }) else { return nil }
-            return jsonpond(content).collection()
-        }
-        let data = decodeData(path ?? "", copyCollectionData: true)
-        if data?.type != "CODE_COLLECTION" {
+    /// Get collection of items either from array or object. Gives array of [JSONChild] which each has property index and key.
+    public func collection(_ path: String? = nil, ignoreType: Bool = false, similarKeyMatch: Bool = false) -> [JSONChild]? {
+        guard let data = decodeData(path ?? "", 
+         copyCollectionData: true,
+         ignoreCaseAndSpecialCharacters: similarKeyMatch) else {
             return nil
         }
-        return data?.value.array
+        if ignoreType && data.type == "string"{
+            return JSONBlock(data.value.string).collection()
+        }
+        if data.type != "CODE_COLLECTION" {
+            return nil
+        }
+        return data.value.children
     }
     
     /// Check if attribute or element exists in given address path.
-    public func isExist(_ path:String) -> Bool {
-        return decodeData(path) != nil
+    public func isExist(
+        _ path:String,
+        similarKeyMatch: Bool = false) -> Bool {
+        return decodeData(path, ignoreCaseAndSpecialCharacters: similarKeyMatch) != nil
     }
     
     /// Check if attribute or element exists in given address path.
-    public func isExist(_ path:String) -> jsonpond? {
-        return decodeData(path) != nil ? self : nil
+    public func isExist(_ path:String, similarKeyMatch: Bool = false) -> JSONBlock? {
+        return decodeData(path, ignoreCaseAndSpecialCharacters: similarKeyMatch) != nil ? self : nil
     }
     
     
-    private func resolveValue(_ stringData: String, _ byteData: UnsafeRawBufferPointer, _ type: String, serialize: Bool = false) -> Any {
+    private func resolveValue(_ stringData: String, _ byteData: [UInt8], _ type: String) -> Any {
         switch(type) {
             case "number": return Double(stringData) ?? "#INVALID_NUMERIC"
-            case "array": return jsonpond(byteData, "array").collection()!
+            case "array": return JSONBlock(byteData, "array").collection()!
             case "boolean": return stringData == "true" ? true : false
             case "null": return Constants.NULL
             default: return stringData
@@ -284,14 +278,14 @@ public class jsonpond {
     }
     
     /// Read JSON element without type constraints.
-    /// Similar to calling string(), array(), object() .etc but without knowing the data type
+    /// Similar to calling string(), array(), objectEntry() .etc but without knowing the data type
     /// of queried value. Returns castable any value along with data type
-    public func any(_ path: String) -> (value: Any, type: JSONType)? {
-        guard let (value, type) = decodeData(path) else { return nil }
+    public func any(_ path: String, similarKeyMatch: Bool = false) -> (value: Any, type: JSONType)? {
+        guard let (value, type) = decodeData(path, ignoreCaseAndSpecialCharacters: similarKeyMatch) else { return nil }
         if type == "object" {
-            return (jsonpond(value.memoryHolder, "object"), JSONType("object"))
+            return (JSONBlock(value.memoryHolder, "object"), JSONType("object"))
         }
-        return (resolveValue(value.string, value.bytes, type), JSONType(type))
+        return (resolveValue(value.string, value.memoryHolder, type), JSONType(type))
     }
     
     /// Get the data type of the value held by the content of this node.
@@ -299,62 +293,70 @@ public class jsonpond {
         return JSONType(contentType)
     }
     
-    private static func _serializeToBytes(_ node: Any, _ index: Int, _ tabCount: Int) -> [UInt8]  {
-        guard let object = node as? [String: Any] else {
-            guard let array = node as? [Any] else {
-                guard let string = node as? String else {
-                    guard let boolean =  node as? Bool else {
-                        guard let intNumber = node as? Int else {
-                            guard let doubleNumber = node as? Double else {
-                                if node as? Constants == .NULL {
-                                    return [110, 117, 108, 108]
+    private static func _serializeToBytes(_ node: Any?, _ index: Int, _ tabCount: Int, _ stringDelimiter: UInt8) -> [UInt8]  {
+        if let node {
+            guard let object = node as? [String: Any?] else {
+                guard let array = node as? [Any?] else {
+                    guard let string = node as? String else {
+                        guard let boolean =  node as? Bool else {
+                            guard let intNumber = node as? Int else {
+                                guard let doubleNumber = node as? Double else {
+                                    return [stringDelimiter, 35, 73, 78, 86, 65, 76, 73, 68, 95, 84, 89, 80, 69, stringDelimiter] // "#INVALID_TYPE"
                                 }
-                                return [34, 35, 73, 78, 86, 65, 76, 73, 68, 95, 84, 89, 80, 69, 34] // "#INVALID_TYPE"
+                                return Array(String(doubleNumber).utf8)
                             }
-                            return Array(String(doubleNumber).utf8)
+                            return Array(String(intNumber).utf8)
                         }
-                        return Array(String(intNumber).utf8)
+                        return boolean ? [116, 114, 117, 101] : [102, 97, 108, 115, 101]
                     }
-                    return boolean ? [116, 114, 117, 101] : [102, 97, 108, 115, 101]
+                    return [stringDelimiter] + Array(string.utf8) + [stringDelimiter]
                 }
-                return [34] + Array(string.utf8) + [34]
+                let innerContent = array.map({_serializeToBytes($0, index + 1, tabCount, stringDelimiter)})
+                if tabCount != 0 && innerContent.count != 0 {
+                    let spacer: [UInt8] = Array(repeating: 32, count: (index + 1) * tabCount)
+                    let endSpacer: [UInt8] = Array(repeating: 32, count: index * tabCount)
+                    var data: [UInt8] = [91, 10]
+                    let seperator: [UInt8] = [44, 10] + spacer
+                    data.append(contentsOf: spacer)
+                    data.append(contentsOf: innerContent.joined(separator: seperator))
+                    data.append(10)
+                    data.append(contentsOf: endSpacer)
+                    data.append(93)
+                    return data
+                }
+                return ([91] + innerContent.joined(separator: [44])) + [93]
             }
-            let innerContent = array.map({_serializeToBytes($0, index + 1, tabCount)})
+            let innerContent = object.map({(key, value) in
+                (([stringDelimiter] + Array(key.utf8)) + (tabCount != 0 ? [stringDelimiter, 58, 32] : [stringDelimiter, 58])) + _serializeToBytes(value,index + 1 , tabCount, stringDelimiter)
+            })
             if tabCount != 0 && innerContent.count != 0 {
                 let spacer: [UInt8] = Array(repeating: 32, count: (index + 1) * tabCount)
                 let endSpacer: [UInt8] = Array(repeating: 32, count: index * tabCount)
-                var data: [UInt8] = [91, 10]
+                var data: [UInt8] = [123, 10]
                 let seperator: [UInt8] = [44, 10] + spacer
                 data.append(contentsOf: spacer)
                 data.append(contentsOf: innerContent.joined(separator: seperator))
                 data.append(10)
                 data.append(contentsOf: endSpacer)
-                data.append(93)
+                data.append(125)
                 return data
             }
-            return ([91] + innerContent.joined(separator: [44])) + [93]
+            return ([123] + (innerContent.joined(separator: [44]))) + [125]
+        } else {
+            return [110, 117, 108, 108]
         }
-        let innerContent = object.map({(key, value) in
-            (([34] + Array(key.utf8)) + (tabCount != 0 ? [34, 58, 32] : [34, 58])) + _serializeToBytes(value,index + 1 , tabCount)
-        })
-        if tabCount != 0 && innerContent.count != 0 {
-            let spacer: [UInt8] = Array(repeating: 32, count: (index + 1) * tabCount)
-            let endSpacer: [UInt8] = Array(repeating: 32, count: index * tabCount)
-            var data: [UInt8] = [123, 10]
-            let seperator: [UInt8] = [44, 10] + spacer
-            data.append(contentsOf: spacer)
-            data.append(contentsOf: innerContent.joined(separator: seperator))
-            data.append(10)
-            data.append(contentsOf: endSpacer)
-            data.append(125)
-            return data
-        }
-        return ([123] + (innerContent.joined(separator: [44]))) + [125]
     }
     
-    public static func write(_ jsonData: Any, prettify: Bool = true) -> jsonpond {
+    /// write JSON content from scratch recursively. use mapOf and listOf() to write object and array content respectively.
+    public static func write(_ jsonData: Any, prettify: Bool = true) -> JSONBlock {
+        let generatedBytes = _serializeToBytes(jsonData, 0, prettify ? 4 : 0, 34)
+        if generatedBytes.first == 34 {
+            return JSONBlock(String(
+                generatedBytes.map({Character(UnicodeScalar($0))})
+            ), "string")
+        }
         let type = (jsonData as? [String: Any]) != nil ? "object" : "array"
-        return jsonpond(_serializeToBytes(jsonData, 0, prettify ? 4 : 0),type)
+        return JSONBlock(generatedBytes, type)
     }
     
     private func _continueCopyData(_ iterator: inout UnsafeRawBufferPointer.Iterator, _ data: inout [UInt8], _ dataToAdd: [UInt8], dataType: Int) {
@@ -376,7 +378,7 @@ public class jsonpond {
         } else if dataType == 1 {
             while true {
                 guard let char = iterator.next() else { break }
-                if char == 34 {
+                if char == QUOTATION {
                     break
                 }
             }
@@ -421,11 +423,6 @@ public class jsonpond {
         case delete
     }
     
-    public enum QuotationDelimiter {
-        case singleQuotation
-        case escapedDoubleQuotation
-    }
-    
     public enum ErrorCode: String {
         case objectKeyNotFound = "cannot find object attribute"
         case arrayIndexNotFound = "cannot find given index within array bounds"
@@ -434,7 +431,8 @@ public class jsonpond {
         case nonNestableRootType = "root data type is neither array or object and cannot transverse"
         case nonNestedParent = "intermediate parent is a leaf node and non-nested. Cannot transverse further"
         case emptyQueryPath = "query path cannot be empty at this query usage"
-        case captureUnknownElement = "the path cannot be end with a intermediate representer"
+        case captureUnknownElement = "the path cannot be end with a intermediate representer token"
+        case cannotFindElement = "unable to find any element that matches the given path pattern"
         case other = "something went wrong. Target element cannot be found"
         
         /// Provide string representation of error.
@@ -451,7 +449,7 @@ public class jsonpond {
         
         while true {
             guard let char = copiedData.last else { break }
-            if !escapeCharacter && char == 34 {
+            if !escapeCharacter && char == QUOTATION {
                 isInQuotes = !isInQuotes
             }
             if !isInQuotes {
@@ -477,7 +475,7 @@ public class jsonpond {
         
         while true {
             guard let char = iterator.next() else { break }
-            if !escapeCharacter && char == 34 {
+            if !escapeCharacter && char == QUOTATION {
                 isInQuotes = !isInQuotes
             }
             if !isInQuotes {
@@ -540,8 +538,29 @@ public class jsonpond {
         return ans
     }
     
-    private func _splitPath(_ path: String) -> [[UInt8]] {
-        let paths: [[UInt8]] =  path.split(separator: pathSpliter).map({Array($0.utf8)})
+    private func _splitPath(_ path: String, makeIgnoreCases: Bool = false) -> [[UInt8]] {
+        let paths: [[UInt8]]
+        if makeIgnoreCases {
+             paths = path.split(separator: pathSpliter).map({
+                text in
+                let utfArray = Array(text.utf8)
+                if utfArray == intermediateSymbol {
+                     return utfArray
+                }
+                var modifiedUtf: [UInt8] = []
+                for char in utfArray {
+                    if (char > 96 && char < 123)
+                        || (char > 47 && char < 58) {
+                        modifiedUtf.append(char)
+                    } else if (char > 64 && char < 91) {
+                        modifiedUtf.append(char + 32)
+                    }
+                }
+                return modifiedUtf
+            })
+        } else {
+            paths = path.split(separator: pathSpliter).map({Array($0.utf8)})
+        }
         if pathSpliter != "." {
             pathSpliter = "."
         }
@@ -549,7 +568,7 @@ public class jsonpond {
     }
     
     /// Attach a query fail listener to the next read or write query. Listener will be removed after single use.
-    public func onQueryFail(_ handler: @escaping ((error: ErrorCode, querySegmentIndex: Int)) -> Void) -> jsonpond {
+    public func onQueryFail(_ handler: @escaping ((errorCode: ErrorCode, failedIndex: Int)) -> Void) -> JSONBlock {
         errorHandler = handler
         return self
     }
@@ -563,13 +582,13 @@ public class jsonpond {
             copiedBytes.append(contentsOf: [UInt8] (repeating: 32, count: (paths.count) * tabUnitCount))
         }
         if isInObject {
-            copiedBytes.append(34)
+            copiedBytes.append(QUOTATION)
             copiedBytes.append(contentsOf: paths[paths.count - 1])
-            let endKeyPhrase: [UInt8] = tabUnitCount == 0 ? [34, 58] : [34, 58, 32]
+            let endKeyPhrase: [UInt8] = tabUnitCount == 0 ? [QUOTATION, 58] : [QUOTATION, 58, 32]
             copiedBytes.append(contentsOf: endKeyPhrase)
         }
         
-        var bytesToAdd = jsonpond._serializeToBytes(dataToAdd, paths.count, tabUnitCount)
+        var bytesToAdd = JSONBlock._serializeToBytes(dataToAdd, paths.count, tabUnitCount, QUOTATION)
         
         if !isIntermediateAdd {
             if tabUnitCount != 0 {
@@ -578,7 +597,22 @@ public class jsonpond {
             }
             bytesToAdd.append(isInObject ? 125 : 93)
         } else {
-            bytesToAdd.append(44)
+            var trialBytes: [UInt8] = []
+            // this was due to rare case when pushing to an empty array when push index is 0
+            while true {
+                guard let char = iterator.next() else { break }
+                trialBytes.append(char)
+                if char != 32 && char != 10 {
+                    if char != 93 {
+                        bytesToAdd.append(44)
+                    } else if tabUnitCount != 0 {
+                        bytesToAdd.append(10)
+                        bytesToAdd.append(contentsOf: [UInt8] (repeating: 32, count: (paths.count - 1) * tabUnitCount))
+                    }
+                    break
+                }
+            }
+            bytesToAdd.append(contentsOf: trialBytes)
         }
         _continueCopyData(&iterator, &copiedBytes, bytesToAdd, dataType: 4)
         return nil
@@ -586,7 +620,7 @@ public class jsonpond {
 
     @discardableResult
     /// Update the given given query path.
-    public func update(_ path: String, _ data: Any) -> jsonpond {
+    public func replace(_ path: String, _ data: Any) -> JSONBlock {
         errorInfo = _write(path, data, writeMode: .onlyUpdate)
         if errorInfo != nil {
             errorHandler?(errorInfo!)
@@ -596,8 +630,8 @@ public class jsonpond {
     }
     
     @discardableResult
-    /// Insert an element to the given query path. If the last segment of the path is an array then the element will be added to the array else if it's a nonexistent key then the key attribute will be added to the object.
-    public func insert(_ path: String, _ data: Any) -> jsonpond {
+    /// Insert an element to the given query path. Last segment of the path can be attribute name to insert or update else and index if handling arrays.
+    public func push(_ path: String, _ data: Any) -> JSONBlock {
         errorInfo = _write(path, data, writeMode: .onlyInsert)
         if errorInfo != nil {
             errorHandler?(errorInfo!)
@@ -608,7 +642,7 @@ public class jsonpond {
         
     @discardableResult
     /// Update or insert data to node of the given query path.
-    public func upsert(_ path: String, _ data: Any) -> jsonpond {
+    public func replaceOrPush(_ path: String, _ data: Any) -> JSONBlock {
         errorInfo = _write(path, data, writeMode: .upsert)
         if errorInfo != nil {
             errorHandler?(errorInfo!)
@@ -618,8 +652,8 @@ public class jsonpond {
     }
     
     @discardableResult
-    /// delete path if exists. Return if delete successfull or not.
-    public func delete(_ path: String) -> jsonpond {
+    /// delete path if exists. Return if delete successfully or not.
+    public func delete(_ path: String) -> JSONBlock {
         errorInfo = _write(path, 0, writeMode: .delete)
         if errorInfo != nil {
             errorHandler?(errorInfo!)
@@ -665,7 +699,10 @@ public class jsonpond {
                 if char == 123 || char == 91 {
                     notationBalance += 1
                     if searchValue == 1 {
-                        let bytesToAdd = jsonpond._serializeToBytes(data, paths.count, tabUnitCount)
+                        if writeMode == .onlyInsert {
+                            return (ErrorCode.objectKeyAlreadyExists, processedindex - 1)
+                        }
+                        let bytesToAdd = JSONBlock._serializeToBytes(data, paths.count, tabUnitCount, QUOTATION)
                         _continueCopyData(&iterator, &copiedBytes, bytesToAdd, dataType: 0)
                         return nil
                     } else if char == 91 && (processedindex + 1) == notationBalance {
@@ -686,8 +723,14 @@ public class jsonpond {
                             } else {
                                 searchValue = 2
                             }
-                        } else if processedindex == (paths.count - 1) && (writeMode == .upsert || writeMode == .onlyInsert) {
-                            return _addData(false, data, &iterator, &copiedBytes, tabUnitCount, paths: paths)
+                        } else if processedindex < (paths.count - 1) {
+                            return (ErrorCode.arrayIndexNotFound, processedindex)
+                        } else if processedindex == (paths.count - 1) {
+                            if writeMode == .upsert || writeMode == .onlyInsert {
+                                return _addData(false, data, &iterator, &copiedBytes, tabUnitCount, paths: paths)
+                            } else {
+                                return (ErrorCode.arrayIndexNotFound, processedindex)
+                            }
                         }
                         continue
                     }
@@ -696,11 +739,11 @@ public class jsonpond {
                     }
                 } else if char == 125 || char == 93 {
                     notationBalance -= 1
-                    if processedindex == notationBalance {
-                        if processedindex + 1 == paths.count && (writeMode == .upsert || writeMode == .onlyInsert) {
+                    if processedindex >= notationBalance {
+                        if notationBalance + 1 == paths.count && (writeMode == .upsert || writeMode == .onlyInsert) {
                             return _addData(char == 125, data, &iterator, &copiedBytes, tabUnitCount, paths: paths)
                         }
-                        return (char == 125 ? ErrorCode.objectKeyNotFound : ErrorCode.arrayIndexNotFound, processedindex)
+                        return (char == 125 ? ErrorCode.objectKeyNotFound : ErrorCode.arrayIndexNotFound, notationBalance)
                     }
                 } else if char == 58 && (processedindex + 1) == notationBalance {
                     if paths[processedindex] == grabbedKey {
@@ -723,22 +766,22 @@ public class jsonpond {
                     if writeMode == .onlyInsert {
                         return (ErrorCode.objectKeyAlreadyExists, processedindex - 1)
                     }
-                    let bytesToAdd = jsonpond._serializeToBytes(data, paths.count, tabUnitCount)
+                    let bytesToAdd = JSONBlock._serializeToBytes(data, paths.count, tabUnitCount, QUOTATION)
                     _continueCopyData(&iterator, &copiedBytes, bytesToAdd, dataType: 3)
                     return nil
                 }
             }
-            if !isEscaping && char == 34 {
+            if !isEscaping && char == QUOTATION {
                 isQuotes = !isQuotes
                 if searchValue > 0 {
                     if searchValue == 2 {
                         return (ErrorCode.nonNestedParent, processedindex - 1)
                     }
                     if writeMode == .onlyInsert {
-                        return (ErrorCode.objectKeyAlreadyExists, paths.count - 2)
+                        return (ErrorCode.objectKeyAlreadyExists, processedindex - 1)
                     }
 
-                    let bytesToAdd = jsonpond._serializeToBytes(data, paths.count, tabUnitCount)
+                    let bytesToAdd = JSONBlock._serializeToBytes(data, paths.count, tabUnitCount, QUOTATION)
                     _continueCopyData(&iterator, &copiedBytes, bytesToAdd, dataType: 1)
                     return nil
                 } else if (processedindex + 1) == notationBalance {
@@ -760,20 +803,60 @@ public class jsonpond {
         return (ErrorCode.other, processedindex)
     }
     
+    private func _prettyifyContent(_ originalContent: UnsafeRawBufferPointer) -> String {
+        var presentation: [UInt8] = []
+        var notationBalance = 0
+        var isEscaping = false
+        var isQuotes = false
+        if originalContent[1] == 10 { // already being pretty...
+            return String(originalContent.map({Character(UnicodeScalar($0))}))
+        }
+        for char in originalContent {
+            if !isEscaping && char == QUOTATION {
+                isQuotes = !isQuotes
+            } else if !isQuotes {
+                if char == 123 || char == 91 {
+                    notationBalance += 1
+                    presentation.append(char)
+                    presentation.append(10)
+                    presentation.append(contentsOf: [UInt8] (repeating: 32, count: notationBalance * 3))
+                    continue
+                } else if char == 125 || char == 93 {
+                    notationBalance -= 1
+                    presentation.append(10)
+                    presentation.append(contentsOf: [UInt8] (repeating: 32, count: notationBalance * 3))
+                } else if char == 44 {
+                    presentation.append(char)
+                    presentation.append(10)
+                    presentation.append(contentsOf: [UInt8] (repeating: 32, count: notationBalance * 3))
+                    continue
+                } else if char == 58 {
+                    presentation.append(char)
+                    presentation.append(32)
+                    continue
+                }
+            }
+
+            if isEscaping {
+                isEscaping = false
+            } else if char == 92 {
+                isEscaping = true
+            }
+            presentation.append(char)
+        }
+        return String(presentation.map({Character(UnicodeScalar($0))}))
+    }
     /// Convert the selected element content to representable string.
-    public func stringify(_ path: String) -> String? {
-        guard let result =  decodeData(path)
+    public func stringify(_ path: String, similarKeyMatch: Bool = false) -> String? {
+        guard let result =  decodeData(path, ignoreCaseAndSpecialCharacters: similarKeyMatch)
         else { return nil }
         
-        return result.value.bytes.count == 0 ? result.value.string : 
-        String(result.value.bytes.map({
-                Character(UnicodeScalar($0))
-        }))   
+        return result.type == "object" || result.type == "array" ? _prettyifyContent(result.value.memoryHolder.withUnsafeBytes({$0})) : result.value.string
     }
     
     /// Convert the selected element content to representable string.
     public func stringify() -> String {
-        return jsonData.count == 0 ? jsonText : String(jsonData.map({Character(UnicodeScalar($0))}))
+        return contentType == "object" || contentType == "array" ? _prettyifyContent(jsonData) : jsonText
     }
     
     /// Get the natural value of JSON node. Elements expressed in associated swift type except
@@ -785,44 +868,49 @@ public class jsonpond {
             var iterator = jsonData.makeIterator()
             return _getStructuredData(&iterator, firstCharacter: iterator.next()!).value.tree
         }
-        return resolveValue(jsonText, jsonData, contentType)
+        return resolveValue(jsonText, jsonDataMemoryHolder, contentType)
     }
     
     /// Get natural value of an element for given path with data type. Similar to parse(path:).
-    public func parseWithType(_ path: String) -> (value: Any,type: JSONType)? {
+    public func parseWithType(_ path: String, similarKeyMatch: Bool = false) -> (value: Any,type: JSONType)? {
         extractInnerContent = true
-        guard let (value, type) = decodeData(path) else { return nil }
+        guard let (value, type) = decodeData(path, ignoreCaseAndSpecialCharacters: similarKeyMatch) else { return nil }
         extractInnerContent = false
         if (type == "object" || type == "array") {
             return (value.tree, JSONType(type))
         }
-        return (resolveValue(value.string, value.bytes, type), JSONType(type))
+        return (resolveValue(value.string, value.memoryHolder, type), JSONType(type))
     }
     
     /// Get the natural value of JSON node. Elements expressed in associated swift type except
     /// for null represented in `.Constants.NULL` based on their data type. Both array and
     /// object are represented by dictionary and array respectively and their subelements are
     /// parsed recursively until to singular values.
-    public func parse(_ path: String) -> Any? {
+    public func parse(_ path: String, similarKeyMatch: Bool = false) -> Any? {
         extractInnerContent = true
-        guard let (value, type) = decodeData(path) else { return nil }
+        guard let (value, type) = decodeData(path, ignoreCaseAndSpecialCharacters: similarKeyMatch) else { return nil }
         extractInnerContent = false
         if type == "object" || type == "array" {
             return value.tree
         }
-        return resolveValue(value.string, value.bytes, type)
+        return resolveValue(value.string, value.memoryHolder, type)
     }
     
     /// Capture the node addressed by the given path.
-    public func capture(_ path: String) -> jsonpond? {
-        guard let result = decodeData(path) else { return nil }
-        return result.value.bytes.count == 0 ? 
-            jsonpond(result.value.string, result.type) :
-            jsonpond(result.value.memoryHolder, result.type)
+    public func capture(_ path: String, similarKeyMatch: Bool = false) -> JSONBlock? {
+        guard let result = decodeData(path, ignoreCaseAndSpecialCharacters: similarKeyMatch) else { return nil }
+        return result.type == "object" || result.type == "array" ?
+        JSONBlock(result.value.memoryHolder, result.type) : JSONBlock(result.value.string, result.type)
+            
     }
     
-    private func decodeData(_ inputPath:String, copyCollectionData: Bool = false) -> (value: ValueStore, type: String)? {
-        let results = exploreData(inputPath, copyCollectionData: copyCollectionData)
+    ///Gell collection all values on that matches the given path.
+    public func all(_ path: String, similarKeyMatch: Bool = false) -> [JSONBlock] {
+        return decodeData(path, ignoreCaseAndSpecialCharacters: similarKeyMatch, grabAllPaths: true)?.value.array ?? []
+    }
+    
+    private func decodeData(_ inputPath:String, copyCollectionData: Bool = false, ignoreCaseAndSpecialCharacters: Bool, grabAllPaths: Bool = false) -> (value: ValueStore, type: String)? {
+        let results = exploreData(inputPath, copyCollectionData, ignoreCaseAndSpecialCharacters, grabAllPaths)
         if errorInfo != nil {
             errorHandler?(errorInfo!)
             errorHandler = nil
@@ -853,7 +941,7 @@ public class jsonpond {
             return Double(input) ?? "#INVALID_NUMERIC"
         }
     }
-    class CollectionHolder {
+    private class CollectionHolder {
         var type: String
         var objectCollection: [String: Any]
         var arrayCollection: [Any]
@@ -938,7 +1026,7 @@ public class jsonpond {
                     shouldProccessObjectValue = false
                 }
             }
-            if !escapeCharacter && char == 34 {
+            if !escapeCharacter && char == QUOTATION {
                 isInQuotes = !isInQuotes
                 isGrabbingText = isInQuotes
                 if isGrabbingText {
@@ -974,7 +1062,7 @@ public class jsonpond {
         if elementIndex == 0 { return true }
         while true {
             guard let char = iterator.next() else { break }
-            if !escapeChracter && char == 34 {
+            if !escapeChracter && char == QUOTATION {
                 isQuotes = !isQuotes
             }
             if !isQuotes {
@@ -1013,7 +1101,7 @@ public class jsonpond {
         while true {
             guard let char = iterator.next() else { break }
             
-            if !escapeChracter && char == 34 {
+            if !escapeChracter && char == QUOTATION {
                 isQuotes = !isQuotes
             }
             if !isQuotes {
@@ -1048,7 +1136,7 @@ public class jsonpond {
         var isEscape = false
         while true {
             guard let char = iterator.next() else { break }
-            if !isEscape && char == 34 {
+            if !isEscape && char == QUOTATION {
                 isQuotes = !isQuotes
             }
             if !isQuotes {
@@ -1062,21 +1150,24 @@ public class jsonpond {
                         return
                     }
                 }
+                if char > 32 {
+                    copiedData.append(char)
+                }
+            } else {
+                copiedData.append(char)
             }
             if isEscape {
                 isEscape = false
             } else if char == 92 {
                 isEscape = true
             }
-            copiedData.append(char)
         }
     }
     
-    private func _getObjectEntries(_ iterator: inout UnsafeRawBufferPointer.Iterator) -> [jsonpond] {
-        var values: [jsonpond] = []
+    private func _getObjectEntries(_ iterator: inout UnsafeRawBufferPointer.Iterator) -> [JSONChild] {
+        var values: [JSONChild] = []
         var bytes: [UInt8] = []
         var text: String = ""
-        var isGrabbing = false
         var dataType = ""
         var isQuotes = false
         var grabbedKey = ""
@@ -1084,31 +1175,29 @@ public class jsonpond {
         var shouldGrabItem = false
         while true {
             guard let char = iterator.next() else { break }
-             if !isEscaping && char == 34 {
+             if !isEscaping && char == QUOTATION {
                 isQuotes = !isQuotes
                 if isQuotes {
                     text = ""
-                    isGrabbing = true
                     continue
                 } else {
                     if shouldGrabItem {
                         shouldGrabItem = false
-                        values.append(jsonpond(text, "string").setKey(grabbedKey))
+                        values.append(JSONChild(text, "string").setKey(grabbedKey))
                     }
-                    isGrabbing = false
                 }
             } else if !isQuotes {
                 if char == 123 || char == 91 {
                     bytes = [char]
                     dataType = char == 123 ? "object" : "array"
                     _grabData(&bytes, &iterator)
-                    values.append(jsonpond(bytes, dataType).setKey(grabbedKey))
+                    values.append(JSONChild(bytes, dataType).setKey(grabbedKey))
                     shouldGrabItem = false
                     continue
                 }
                 if shouldGrabItem {
                     if let result = _getPrimitive(&iterator, char) {
-                        values.append(jsonpond(result.value, result.dataType).setKey(grabbedKey))
+                        values.append(JSONChild(result.value, result.dataType).setKey(grabbedKey))
                         shouldGrabItem = false
                         if result.didContainerClosed {
                             return values
@@ -1121,8 +1210,7 @@ public class jsonpond {
                 } else if char == 125 {
                     return values
                 }
-            }
-            if isGrabbing {
+            } else {
                 text.append(Character(UnicodeScalar(char)))
             }
             if isEscaping {
@@ -1135,39 +1223,36 @@ public class jsonpond {
     }
 
     
-    private func _getArrayValues(_ iterator: inout UnsafeRawBufferPointer.Iterator) -> [jsonpond] {
-        var values: [jsonpond] = []
+    private func _getArrayValues(_ iterator: inout UnsafeRawBufferPointer.Iterator) -> [JSONChild] {
+        var values: [JSONChild] = []
         var bytes: [UInt8] = []
         var text: String = ""
-        var isGrabbing = false
         var dataType = ""
         var isQuotes = false
         var isEscaping = false
         var index = 0
         while true {
             guard let char = iterator.next() else { break }
-            if !isEscaping && char == 34 {
+            if !isEscaping && char == QUOTATION {
                 isQuotes = !isQuotes
                 if isQuotes {
                     text = ""
-                    isGrabbing = true
                     continue
                 } else {
-                    values.append(jsonpond(text, "string").setIndex(index))
+                    values.append(JSONChild(text, "string").setIndex(index))
                     index += 1
-                    isGrabbing = false
                 }
             } else if !isQuotes {
                 if char == 123 || char == 91 {
                     bytes = [char]
                     dataType = char == 123 ? "object" : "array"
                     _grabData(&bytes, &iterator)
-                    values.append(jsonpond(bytes, dataType).setIndex(index))
+                    values.append(JSONChild(bytes, dataType).setIndex(index))
                     index += 1
                     continue
                 }
                 if let result = _getPrimitive(&iterator, char) {
-                    values.append(jsonpond(result.value, result.dataType).setIndex(index))
+                    values.append(JSONChild(result.value, result.dataType).setIndex(index))
                     index += 1
                     if result.didContainerClosed {
                         return values
@@ -1176,8 +1261,7 @@ public class jsonpond {
                     return values
                 }
                 
-            }
-            if isGrabbing {
+            } else {
                 text.append(Character(UnicodeScalar(char)))
             }
             if isEscaping {
@@ -1215,18 +1299,24 @@ public class jsonpond {
         return nil
     }
     
-    private func exploreData(_ inputPath: String, copyCollectionData: Bool
+    private func _singleItemList(_ source: JSONBlock) -> (ValueStore, String) {
+        return (ValueStore(arrayData: [source]), "CODE_ALL")
+    }
+    
+    private func exploreData(_ inputPath: String,
+     _ copyCollectionData: Bool,
+     _ ignoreCaseAndSpecialCharacters: Bool, _ grabAllPaths: Bool
         ) -> (value: ValueStore, type: String)? {
         errorInfo = nil
         if !(contentType == "object" || contentType == "array") {
             errorInfo = (ErrorCode.nonNestableRootType, 0)
             return nil
         }
-        var paths:[[UInt8]] = _splitPath(inputPath)
+        var paths:[[UInt8]] = _splitPath(inputPath, makeIgnoreCases: ignoreCaseAndSpecialCharacters)
         var processedPathIndex = 0
         var isNavigatingUnknownPath = false
         var advancedOffset = 0
-        var tranversalHistory: [(processedPathIndex: Int, advancedOffset: Int)] = []
+        var traversalHistory: [(processedPathIndex: Int, advancedOffset: Int)] = []
 
         var isInQuotes = false
         var startSearchValue = false
@@ -1234,12 +1324,23 @@ public class jsonpond {
         var grabbedText = ""
         var grabbedBytes: [UInt8] = []
         var grabbingKey:[UInt8] = []
-        var needProccessKey = false
+        var needProcessKey = false
         var isGrabbingKey = false
     
         var notationBalance = 0
         var grabbingDataType: String = "string"
         var escapeCharacter: Bool = false
+        var commonPathCollections: [JSONBlock] = []
+        
+        func restoreLastPointIfNeeded() -> Bool {
+            if traversalHistory.count > 0 {
+                (processedPathIndex, advancedOffset) =  traversalHistory[traversalHistory.count - 1]
+                startSearchValue = false
+                isNavigatingUnknownPath = true
+                return true
+            }
+            return false
+        }
         
         if paths.count == 0 && !copyCollectionData {
             errorInfo = (ErrorCode.emptyQueryPath, -1)
@@ -1263,27 +1364,35 @@ public class jsonpond {
                         }
                         if copyCollectionData {
                             if char == 123 {
-                                return (ValueStore(arrayData: _getObjectEntries(&iterator)), "CODE_COLLECTION")
+                                return (ValueStore(childData: _getObjectEntries(&iterator)), "CODE_COLLECTION")
                             }
-                            return (ValueStore(arrayData: _getArrayValues(&iterator)), "CODE_COLLECTION")
+                            return (ValueStore(childData: _getArrayValues(&iterator)), "CODE_COLLECTION")
                         }
                         grabbedBytes = [char]
                         grabbingDataType = char == 123 ? "object" : "array"
                         _grabData(&grabbedBytes, &iterator)
+                        if grabAllPaths {
+                            if restoreLastPointIfNeeded() {
+                                commonPathCollections.append(JSONBlock(grabbedBytes, grabbingDataType))
+                                continue
+                            }
+                            return _singleItemList(JSONBlock(grabbedBytes, grabbingDataType))
+                        }
                         return (ValueStore(grabbedBytes), grabbingDataType)
                     }
-                    
-                    // intiate elements counting inside array on reaching open bracket...
+                    if paths[processedPathIndex] == intermediateSymbol {
+                        isNavigatingUnknownPath = true
+                        traversalHistory.append((processedPathIndex, advancedOffset))
+                        paths.remove(at: processedPathIndex)
+                    }
+                    // initiate elements counting inside array on reaching open bracket...
                     if char == 91 && ((advancedOffset + 1) == notationBalance || isNavigatingUnknownPath) {
                         let parsedIndex = _toNumber(paths[processedPathIndex])
                         // occur when trying to access element of array with non-number index
                         if parsedIndex == nil {
-                           if paths[processedPathIndex] == intermediateSymbol {
-                                paths.remove(at: processedPathIndex)
-                                isNavigatingUnknownPath = true
-                                tranversalHistory.append((processedPathIndex, advancedOffset))
+                            if isNavigatingUnknownPath || restoreLastPointIfNeeded() {
                                 continue
-                           } else if isNavigatingUnknownPath { continue }
+                            }
                             errorInfo = (ErrorCode.invalidArrayIndex, processedPathIndex)
                             return nil
                         }
@@ -1292,16 +1401,16 @@ public class jsonpond {
                             advancedOffset = notationBalance - 1
                         }
                         if !_iterateArray(&iterator, elementIndex: parsedIndex!) {
-                            if tranversalHistory.count != 0 {
-                                if tranversalHistory.count != 1 {
-                                    tranversalHistory.removeLast()
+                            if traversalHistory.count != 0 {
+                                if traversalHistory.count != 1 {
+                                    traversalHistory.removeLast()
                                     paths.insert(intermediateSymbol, at: processedPathIndex)
                                 }
-                                (processedPathIndex, advancedOffset) = tranversalHistory[tranversalHistory.count - 1]
+                                (processedPathIndex, advancedOffset) = traversalHistory[traversalHistory.count - 1]
                                 isNavigatingUnknownPath = true
                                 continue
                             }
-                            errorInfo = (ErrorCode.arrayIndexNotFound, paths.count - 1)
+                            errorInfo = (ErrorCode.arrayIndexNotFound, processedPathIndex)
                             return nil
                         }
                         processedPathIndex += 1
@@ -1310,11 +1419,6 @@ public class jsonpond {
                     } else {
                         // move to next nest object and start looking attribute key on next nested object...
                         startSearchValue = false
-                        if paths[processedPathIndex] == intermediateSymbol {
-                            isNavigatingUnknownPath = true
-                            tranversalHistory.append((processedPathIndex, advancedOffset))
-                            paths.remove(at: processedPathIndex)
-                        }
                     }
                     continue
                 }
@@ -1322,21 +1426,25 @@ public class jsonpond {
                 if char == 125 || char == 93 {
                     notationBalance -= 1
                     // occur after all element in foccused array or object is finished searching...
-                    if notationBalance == advancedOffset {
-                        // exit occur after no matching key is found in object
-                        if char == 125 {
-                            if tranversalHistory.count != 0 {
-                                if tranversalHistory.count != 1 {
-                                    tranversalHistory.removeLast()
-                                    paths.insert(intermediateSymbol, at: processedPathIndex)
+                    if notationBalance <= advancedOffset {
+                        if traversalHistory.count != 0 {
+                            if traversalHistory.last!.advancedOffset <= advancedOffset {
+                                paths.insert(intermediateSymbol, at: traversalHistory.removeLast().processedPathIndex)
+                                
+                                if traversalHistory.count == 0 {
+                                    if grabAllPaths {
+                                        return (ValueStore(arrayData: commonPathCollections), "CODE_ALL")
+                                    }
+                                    errorInfo = (ErrorCode.cannotFindElement, notationBalance)
+                                    return nil
                                 }
-                                (processedPathIndex, advancedOffset) = tranversalHistory[tranversalHistory.count - 1]
-                                isNavigatingUnknownPath = true
-                                continue
                             }
-                            errorInfo = (ErrorCode.objectKeyNotFound, paths.count - 1)
-                            return nil
+                            (processedPathIndex, advancedOffset) = traversalHistory.last!
+                            isNavigatingUnknownPath = true
+                            continue
                         }
+                        errorInfo = (char == 125 ? ErrorCode.objectKeyNotFound : ErrorCode.arrayIndexNotFound, notationBalance)
+                        return nil
                         
                     }
                     
@@ -1349,57 +1457,85 @@ public class jsonpond {
                 if notationBalance == advancedOffset {
                     // ====== HANDLING GRABBING STRINGS =========
                     // ignore escaped double quotation characters inside string values...
-                    if !escapeCharacter && char == 34 {
+                    if !escapeCharacter && char == QUOTATION {
                         isInQuotes = !isInQuotes
-                        // if not the last proccesed value skip caturing value
+                        // if not the last processed value skip capturing value
                         if processedPathIndex != paths.count {
+                            if restoreLastPointIfNeeded() {
+                                continue
+                            }
                             errorInfo = (ErrorCode.nonNestedParent, processedPathIndex - 1)
                             return nil
                         }
                         isGrabbingText = !isGrabbingText
                         if !isGrabbingText {
+                            if grabAllPaths {
+                                if restoreLastPointIfNeeded() {
+                                    commonPathCollections.append(JSONBlock(grabbedText, "string"))
+                                    continue
+                                }
+                                return  _singleItemList(JSONBlock(grabbedText, "string"))
+                            }
                             return (ValueStore(grabbedText), "string")
                         } else {
-                            grabbingDataType = "string"
                             grabbedText = ""
                         }
                         // used to copy values true, false, null and number
                     } else {
                         // ========== HANDLING GRABING NUMBERS, BOOLEANS AND NULL
                         if !isInQuotes && !isGrabbingText {
-                            let result = _getPrimitive(&iterator, char)
-                            if result != nil {
+                            if let result = _getPrimitive(&iterator, char) {
                                 if processedPathIndex != paths.count {
+                                    if restoreLastPointIfNeeded() {
+                                        continue
+                                    }
                                     errorInfo = (ErrorCode.nonNestedParent, processedPathIndex - 1)
                                     return nil
                                 }
-                                return (ValueStore(result!.value), result!.dataType)
+                                if grabAllPaths {
+                                    if restoreLastPointIfNeeded() {
+                                        commonPathCollections.append(JSONBlock(result.value,  result.dataType))
+                                        continue
+                                    }
+                                    return _singleItemList(JSONBlock(result.value, result.dataType))
+                                }
+                                return (ValueStore(result.value), result.dataType)
                             }
                         } else if isGrabbingText {
                             grabbedText.append(Character(UnicodeScalar(char)))
                         }
                     }
-                } else if char == 34 && !escapeCharacter {
+                } else if char == QUOTATION && !escapeCharacter {
                     isInQuotes = !isInQuotes
                 }
                 
                 // ========= SECTION RESPONSIBLE HANDLING OBJECT KEY
             } else {
-                if char == 34 && !escapeCharacter {
+                if char == QUOTATION && !escapeCharacter {
                     isInQuotes = !isInQuotes
                     // grabbing the matching correct object key as given in path
                     if (advancedOffset + 1) == notationBalance || isNavigatingUnknownPath {
-                        isGrabbingKey = !isGrabbingKey
+                        isGrabbingKey = isInQuotes
                         if isGrabbingKey {
                             grabbingKey = []
                         } else {
-                            needProccessKey = true
+                            needProcessKey = true
                         }
                     }
                 } else if isGrabbingKey {
-                    grabbingKey.append(char)
-                } else if needProccessKey && char == 58 {
-                    needProccessKey = false
+                    if ignoreCaseAndSpecialCharacters {
+                        if (char > 47 && char < 58) {
+                            grabbingKey.append(char)
+                        } else if (char > 64 && char < 91) {
+                            grabbingKey.append(char + 32)
+                        } else if (char > 96 && char < 123) {
+                            grabbingKey.append(char)
+                        }
+                    } else {
+                        grabbingKey.append(char)
+                    }
+                } else if needProcessKey && char == 58 {
+                    needProcessKey = false
                     // if found start searching for object value for object key
                     if grabbingKey == paths[processedPathIndex] {
                         processedPathIndex += 1
@@ -1423,36 +1559,12 @@ public class jsonpond {
         return nil
     }
     
-    private func replaceEscapedQuotations(_ text: String) -> String {
-        var replaced: String = ""
-        var escaped: Bool = false
-        
-        if stringQuotationDelimter == .escapedDoubleQuotation {
-            for char in text {
-                if char == "\\" {
-                    escaped = true
-                } else if escaped {
-                    if char == "\"" {
-                        replaced.append("\"")
-                    } else {
-                        replaced.append("\\")
-                        replaced.append(char)
-                    }
-                    escaped = false
-                } else {
-                    replaced.append(char)
-                }
-            }
-        } else {
-            for char in text {
-                if char == "'" {
-                    replaced.append("\"")
-                } else {
-                    replaced.append(char)
-                }
-
+    private func identifyStringDelimter(_ text: String) {
+        for char in text {
+            if char == "\"" || char == "'" {
+                QUOTATION = char == "\"" ? 34 : 39
+                break
             }
         }
-        return replaced
     }
 }

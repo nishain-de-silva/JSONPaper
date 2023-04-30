@@ -1,10 +1,29 @@
-# jsonpond (v2.6) :rocket:
+# JSONPond (v2.7) :rocket:
+![](https://img.shields.io/badge/Support-Swift-f16430)
+![](https://img.shields.io/badge/install-Swift_Package_Manager-f16430)
+![](https://img.shields.io/badge/Support-Kotlin-6b6dd7)
+![](https://img.shields.io/badge/install-Maven_Central-6b6dd7)
 
-Swift, is a type of constrained language right? One way of parsing JSON is to parse JSON string to a known `Codable` JSON structure. In Swift 3 you can use `JSONSerialization` but still, you have to chain deserialization calls and it would be a mess when you have to check the existence of attributes or array values before reading or when handling any complex read queries. Also, there are times when the expected JSON structure also can have dynamic in a certain scenario, and would be messy to check the existence of value all the time. jsonpond help you to parse JSON in any free form and extract value without constraining it into a fixed type. This is a pure zero dependency `Swift` package with the technique of `Read Only Need Content` in a single read cycle and which means no byte is read twice! which is why this library is really fast.
+
+Handling JSON in a type-constrained language ecosystem is a bit tough right? One way of parsing JSON is to parse JSON string to a known object model but you have to know the structure of `JSON` beforehand for this. Also, you may need to chain a lot of calls before being made into the final value plus you might have to check the existence of values and data types of those values when handling any complex read queries. Also, there are times you really need JSON structure to be dynamic in a certain scenario and would be messy to apply safe conditionals all over the code base. Maintaining consistency between the backend response structure and expected reading format is required for all of this perhaps now you need a clean and simpler solution to respond adaptively to different `JSON` outputs.
+
+JSONPond helps you to parse JSON in any free form and extract value without constraining it into a fixed type. This is a pure zero dependency `Swift + Kotlin` library with the technique of `Read Only Need Content` in a single read cycle and which means no byte is read twice! and perfect O(1) time complexity which is why this library is really fast.
 
 ## Installation
 
-You can use `Swift Package Manager` to Install `jsonpond` from this repository URL. Thats it!
+### Swift
+
+You can use `Swift Package Manager` to Install `JSONPond` from this repository URL. Thats it!
+
+### Kotlin
+Gradle script
+
+```groovy
+dependencies    {
+    implmementation("") // will be added soon...
+}
+
+```
 
 ## Usage
 
@@ -12,33 +31,50 @@ You can use `Swift Package Manager` to Install `jsonpond` from this repository U
 > The library does `not` handle or validate incorrect `JSON` format in preference for performance. Please make sure to handle and validate JSON in such cases or otherwise would give you incorrect or unexpected any(s). JSON content must be decodable in `UTF` format (Best tested in `UTF-8` format).
 ## Initializing
 
-There are a handful of ways to initialize jsonpond. You can initialize by `string` or from the `Data` instance. Initializing from `Data` is a bit trickier as jsonpond does not use `Foundation` so it cannot resolve the `Data` type. Hence you have to provide the `UnsafeRawBufferPointer` instance instead. You can also provide a function that requires map callback (eg: `Data.withUnsafeBytes` as constructor parameter _(see [withUnsafeBytes](https://developer.apple.com/documentation/swift/array/withunsafebytes(_:)) to learn about such callbacks)_.
+There are a handful of ways to initialize JSONPond. You can initialize by `string` or from the `Data` and `ByteArray` in Swift and Kotlin respectively. In Swift, initializing from `Data` is a bit trickier as JSONPond does not use `Foundation` so it cannot resolve the `Data` type. Hence you have to provide the `UnsafeRawBufferPointer` instance instead. You can also provide a function that requires map callback (eg: `Data.withUnsafeBytes` as constructor parameter _(see [withUnsafeBytes](https://developer.apple.com/documentation/swift/array/withunsafebytes(_:)) to learn about such callbacks)_.
 
+> When initializing from String inner string attributes can be quoted by either single or escaped double quotation you don't have to worry about that!
+
+In Swift,
 ```swift
 // with string ...
 let jsonAsString = "{...}"
-let json = JSONEntity(jsonAsString)
+let json = JSONBlock(jsonAsString)
 
 // ways of initiating with byte data...
 
 let networkData = Data() // your json data
 
-let json = JSONEntity(networkData.withUnsafeBytes) // see simple :)
+let json = JSONBlock(networkData.withUnsafeBytes) // see simple :)
 
 // or
 let bufferPointer: UnsafeRawBufferPointer = networkData.withUnsafeBytes({$0})
 
-let json = JSONEntity(bufferPointer)
+let json = JSONBlock(bufferPointer)
 ```
+in Kotlin,
+```kotlin
+// with string ...
+val jsonAsString = "{...}"
+val json = JSONBlock(jsonAsString)
+
+// ways of initiating with byte array...
+
+val networkData = Data() // your json data
+
+val json = JSONBlock(byteArray)
+```
+
+> Notice that most of the snippets from this documentation are from Swift implementation. You can do the same identical implementation in Kotlin well since most of the API functions have the same name with the same argument signature.
 
 # Reading Data
 To access an attribute or element you can provide a simple `String` path separated by dot (**`.`**) notation (or by another custom character with `splitQuery(Character:)`).
 ```swift
-import jsonpond
+import JSONPond
 
 let jsonText = String(data: apiDataBytes, encoding: .utf8)
 
-let nameValue:String = JSONEntity(jsonText).string("properyA.properyB.2") ?? "default value"
+let nameValue:String = JSONBlock(jsonText).string("properyA.properyB.2") ?? "default value"
 // or
 let someValue = entity("propertyA.???.value")
 ```
@@ -62,32 +98,35 @@ In all query methods if the key / indexed item does not exist in the given path 
 
 **Example**:
 ```swift
-let jsonpond = JSONEntity(jsonText)
+let JSONPond = JSONBlock(jsonText)
 
-jsonpond.number("people.2.details.age") // return age
+JSONPond.number("people.2.details.age") // return age
 
-jsonpond.number("people.2.wrongKey.details.age") // return nil
+JSONPond.number("people.2.wrongKey.details.age") // return nil
 
-jsonpond.number("people.2.details.name") // return nil since name is not a number
+JSONPond.number("people.2.details.name") // return nil since name is not a number
 ```
 
-To check if a value is `null` use the `isNull()` method. Don't assume `nil` as `null` as it could be also that value you expect does not exist at all. Instead, you can use `isNull` which returns a `boolean` if the value is actually `null`.
-
-Calling query methods by omitting the `path` parameter will extract the value in the current instance and return it to the relevant data type or `nil` if the content is in another data type.
+To check if a value is `null` use the `isNull()` method. JSONPond always gives `nil` / `null` when the attribute is missing or when the data type of the value does not match with the expected datatype, **not** when an attribute is representing a JSON null value.
 
 ```swift
 let stringArray = entity.array("pathToArray.studentNames").map({ item in
-    // item is a JSONEntity instance
+    // item is a JSONBlock instance
     return item.string() 
 })
+
 ```
+## Approximate attribute matching
+
+As said before JSONPond is good at handling unknown JSON structures which means in situations you sometimes know the attribute name to search for but you are not sure about case-sensitivity or special characters involved eg: you know about an attribute with the name `studentId` but not sure if its actually `studentID` or `student_Id` or `student-ID`. In every query function, there is `similarKeyMatch` optional boolean parameter whether to match attribute names in case-insensitive behavior **and** ignore all non-alphanumeric characters.
+
 ### Check value existence
 
-You can use `isExist(:path)` which will give either return boolean or an optional reference to the current instance if the path exists. In other words, you can,
+You can use `isExist(:path)` which will give either returns a boolean or an optional reference to the current instance if the path exists (You can only do this on Swift for now - language restrictions:>). In other words, you can,
 ```swift
 // normal conditional use
 if entity.isExist("somePath") {
-    // some work
+    // do some work
 }
 // or chain based on condition
 entity.isExist("somePath")?.stringify()
@@ -96,14 +135,14 @@ entity.isExist("somePath")?.stringify()
 
 For `number`, `boolean`, `object`, and `array` query methods you can parse these values from JSON string by using the `ignoreType` parameter (default `false`)
 - for booleans, the string values must be `"true"` or `"false"` (case-sensitive) only.
-- When parsing `object` and `array` the JSON string should use `escaped` double quotation (`not` single quotations) - **`\"`** for string terminators. Of course, you have to make sure the string is a valid JSON as well.
+- When parsing `object` and `array` the nested delimiter which is automatically detected can be either by single or double quotes.
 
 ```json
 {
     "pathA": {
         "numString": "35"
     },
-    "sampleData": "{\"inner\": \"awesome\"}"
+    "sampleData": "{'inner': 'awesome'}"
 }
 ```
 
@@ -112,8 +151,28 @@ For `number`, `boolean`, `object`, and `array` query methods you can parse these
 
  let value = jsonReference.number("pathA.numString", ignoreType = true) // return 35
 
- let value = jsonReference.object("sampleData", ignoreType = true).string("inner") // return awesome
+ let value = jsonReference.objectEntry("sampleData", ignoreType = true).string("inner") // return awesome
 ```
+## Iterating arrays and objects
+
+Not only arrays you also need to iterate through JSON objects as well. Using `collection(:path)` function you iterate from either array or object so you don't which will give an array of `JSONChild`. `JSONChild` has additional 2 fields named `index` and `key` where `key` get populated when iterating on an object and`index` value is populated on array iteration representing position index.
+
+```swift
+let collection :[JSONChild] = source.collection("pathA.pathToCollection")
+
+collection?.map({
+    // on object enumeration
+    if $0.index == -1 {
+        print($0.key)
+    } else {
+        // on array enumeration
+        print($0.index)
+    }
+    // JSONChild is a sub-class JSONBlock
+    print($0.parse())
+})
+```
+
 ## Handling intermediate dynamic properties
 
 There are situations where you have to access a child embedded inside an intermediate list of nested objects and arrays that can change based on situations on JSON response structure.
@@ -127,19 +186,19 @@ but in another scenario, you have to access age property like this,
 let path = "root.profile.personalInfo.age"
 ```
 This may occur when the application server may provide a different `JSON` structure on the same `API` call due to different environmental parameters (like user credentials role).
-While it is possible to check the existence of intermediate properties conditionally there is a handy way jsonpond use to solve this problem easily.
+While it is possible to check the existence of intermediate properties conditionally there is a handy way JSONPond use to solve this problem easily.
 ```swift
 let path = "root.???.age"
 ```
 The `???` token is an `intermediate representer` to represent generic **zero or more** intermediate paths which can be either **object key** or **array index**.
-You can customize the `intermediate representer` token with another string with `setIntermediateRepresent` with another custom string - the default token string is `???` (In case one of the object attributes also happen to be named `???` !).
+You can customize the `intermediate representer` token with another string with `setIntermediateToken` with another custom string - the default token string is `???` (In case one of the object attributes also happen to be named `???` !).
 
 You can also use multiple `intermediate representer` tokens like this,
 ```swift
 let path = "root.???.info.???.name"
 ```
 
-In this way, you will get the **first occurrence** value that satisfies the given dynamic path.
+In this way, you will get the **first occurrence** value that satisfies the given dynamic path. If you want to collect all attributes that satifies the path then use `all(:path)`.
 
 Few rules,
 >- Do not use multiple consecutive tokens in a single combo like `root.???.???.value`. Use a single token instead.
@@ -166,9 +225,9 @@ type  | output
 .string | string
 .number | double
 .boolean | `true` or `false`
-.object | JSONEntity
-.array | [JSONEntity]
-.null | `jsonpond.Constants.NULL`
+.object | JSONBlock
+.array | [JSONBlock]
+.null | `JSONPond.Constants.NULL`
 
 you could additionally use `type()` to get the data type of the current JSON `reference`.
 
@@ -176,20 +235,21 @@ you could additionally use `type()` to get the data type of the current JSON `re
 
 Sometimes you may need to write the results on a `serializable` destination such as an in-device cache where you have to omit the usage of class instances and unwarp its actual value. You can use `parse()` for this, `array` and `object` will be converted to `array` and `dictionary` recursively until reaching primitive values of boolean, numbers, and null.
 
-_Remember `null` is represented by `jsonpond.Constants.NULL`. This is to avoid optional wrapping._
+_Remember `null` is represented by `JSONPond.Constants.NULL`. This is to avoid optional wrapping._
 
 # Writing Data
-jsonpond now supports the entire CRUD functionality. For write operations, there are 4 functions.
+JSONPond now supports the entire CRUD functionality. For write operations, there are 4 functions.
 - `delete()`
-- `update()`
-- `insert()`
-- `upsert()`
+- `replace()`
+- `push()`
+- `replaceOrPush()`
 
-To write JSON from scratch use the static method `JSONEntity.write()` method,
+To write JSON from scratch use the static method `JSONBlock.write()` method,
 
+In Swift,
 ```swift
 
-JSONEntity.write([
+JSONBlock.write([
     "person": [
         "name": "Joe smith",
         "age": 26,
@@ -197,17 +257,32 @@ JSONEntity.write([
         "Education": [
             "graduated": true,
             "school": "Oxford",
-            "otherDetails": Constants.NULL
+            "otherDetails": nil
         ]
     ]
 ]) // see easy peasy...
-
 ```
-> jsonpond has a global constant with the name `Null` as an alias for the enum `Constants.NULL` you can use that as well!
 
-Write functions made it easy to return the instance that has been written you continue the rest of the work in the chain. When a write function failed jsonpond would provide an error message to find out where in the query did write function specifically failed.
+In Kotlin,
+```kotlin
+JSONBlock.write(mapOf(
+    "person" to mapOf(
+        "name" to "Joe smith",
+        "age" to 26,
+        "hobbies" to listOf("coding", "gaming"),
+        "Education" to mapOf(
+            "graduated" to true,
+            "school" to "Oxford",
+            "otherDetails" to null
+        )
+    )
+))
+```
+> In Kotlin, when defining array type attribute always use `listOf()` instead of `arrayOf()`.
 
-The `insert()` function is used for both adding key attributes for objects as well as appending items to the array. If you set a new attribute or indexed value for an object or array respectively then your path should be:
+All write functions are chainable which allows you to execute mutliple write functions which updates the same instance in the order of the chain. When a write function fail it will execute one time error callback which provided to `onQueryFail(errorHandler:)` function.The callback will only will execute only once and expire after completing the proceeding write operation.
+
+The `push()` function is used for both adding key attributes for objects as well as appending items to the array. In `push()` ending path should contain the name of the attribute when pushing to an object or specify the index when pushing to an array. If you just want to push to the end of the array just include a non-existent index like `-1`.
 ```swift
 let sampleData = [
     "sample": [
@@ -216,33 +291,33 @@ let sampleData = [
 ]
 // for objects - path to object + new key
 let keyPath = "pathA.PathB.targetObject.newKey"
-entity.insert(keyPath, sampleData)
+entity.push(keyPath, sampleData)
 
-// for arrays - only specify path to array
+// for arrays - only specify the path to the array
 let arrayPath = "pathA.PathB.targetArray"
-entity.insert(arrayPath, sampleData)
+entity.push(arrayPath, sampleData)
 ```
 
 > **Warning**
-> write query functions do not support intermediate `???` tags. You should be aware of the absolute path you want to write or delete.
+> Write query functions do not support intermediate `???` tags. You should be aware of the absolute path you want to write or delete.
 
-## Update and Upsert
+## Update and replaceOrPush
 
-In the `update()` method, you generally give the full path to the target element and data to fully replace with. In `upsert` if the key or array item is not found to update then a new element will be added addressed object or array.
+In the `replace()` method, you generally give the full path to the target element and data to fully replace with. In `replaceOrPush` if the key or array item is not found to update then a new element will be added addressed object or array.
 
 ```swift
-let entity.upsert("members.0.residentPlace", "Madacascar")
+let entity.replaceOrPush("members.0.residentPlace", "Madagascar")
 
-let entity.upsert("members.0.hobbies.3", "bird watching")
+let entity.replaceOrPush("members.0.hobbies.3", "bird watching")
 ```
 - first example
-> if the `residentPlace` attribute exists it would be updated by a new value or residentPlace will be added as a new key with the newly assigned value.
+> If the `residentPlace` attribute exists it would be updated by a new value or residentPlace will be added as a new key with the newly assigned value.
 
 - second example
 
 > If a member only has 3 hobbies but since index 3 does not exist it would add another item to the hobbies array or else update the fourth item if it exists.
 
-Basically `insert()` and `update()` are constrained versions of `upsert()`. Insert operation only works if the key or index does not exist and `update()` works only for existing key or array index.
+Basically `push()` and `replace()` are constrained versions of `replaceOrPush()`. Insert operation only works if the key or index does not exist and `replace()` works only for existing key or array index.
 
 ### Delete node
 
@@ -250,10 +325,11 @@ You can use `delete()` of course to delete an item on a given path if the item e
 
 ### Reading bytes
 
-After all of these write operations you can receive the output as bytes in terms of `[Uint8]` or you can `optionally` pass a map function to customize the output with a generic type.
+After all of these write operations you can receive the output as bytes in terms of `[Uint8]` or `ByteArray` or you can `optionally` pass a map function to customize the output with a generic type.
 
+In Swift example,
 ```swift
-let response: Data = entity.update("members.2.location.home", "24/5 backstreet malls").bytes({Data($0)})
+let response: Data = entity.replace("members.2.location.home", "24/5 backstreet malls").bytes({Data($0)})
 
 
 ```
@@ -262,29 +338,29 @@ let response: Data = entity.update("members.2.location.home", "24/5 backstreet m
 
 ## Capturing references
 
-`capture()` is used to capture the `JSONEntity` reference of the given path. You can query values in 2 ways:
+`capture()` is used to capture the `JSONBlock` reference of the given path. You can query values in 2 ways:
 
 ```swift
 let value = reference.string(attributePath)!
 // or
 let value = reference.capture(attributePath)?.string()
-// both give the same result
+//Both give the same result
 ```
 
 ## Error Listeners
 
-jsonpond also allows adding a fail listener before calling a read or write a query to catch possible errors. Error callback gives you a tuple consisting of 2 values: 
+JSONPond also allows adding a fail listener before calling a read or write a query to catch possible errors. Error callback gives you a tuple consisting of 2 values: 
 - The error code
 - Index of the query fragment where the issue has been detected from the query path.
-In the below example if the field `name` is actually a `string` instead of a nested `object` then jsonpond will give you an error
+In the below example if the field `name` is actually a `string` instead of a nested `object` then JSONPond will give you an error
 
 ```swift
 let result = entity
     .onQueryFail({
-        print($0.error.describe())
-        print("occurred on the index:", $0.querySegmentIndex)
+        print($0.errorCode.describe())
+        print("occurred on the index:", $0.failedIndex)
     })
-    .update(
+    .replace(
         "user.details.name.first", "Joe"
     )
     .stringify()

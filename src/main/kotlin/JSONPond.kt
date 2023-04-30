@@ -1,9 +1,11 @@
-/// JSONPond representation of Null
+@file:Suppress("unused")
+
+/** JSONPond constants*/
 enum class Constants {
+    /** JSONPond representation of Null*/
     NULL
 }
-/// JSONPond representation of Null
-val Null = Constants.NULL
+
 enum class JSONType (val rawValue: String) {
     STRING("string"), BOOLEAN("boolean"), OBJECT("object"), ARRAY("array"), NUMBER("number"), NULL("null");
 
@@ -12,7 +14,32 @@ enum class JSONType (val rawValue: String) {
     }
 }
 
-class JSONPond {
+@Suppress("FunctionName")
+open class JSONBlock {
+     class JSONChild: JSONBlock {
+        internal constructor(data: String, type: String): super(data, type)
+        internal constructor(data: ByteArray, type: String): super(data, type)
+
+        /**
+        Name attribute of this element in the parent object.
+     */
+        var key = ""
+
+        /**
+            Index of this element in the parent array.
+         */
+        var index = -1
+        internal fun setKey(newKey: String) : JSONChild {
+            key = newKey
+            return this
+        }
+
+        internal fun setIndex(newIndex: Int) : JSONChild {
+            index = newIndex
+            return this
+        }
+    }
+
     companion object {
         private const val INVALID_START_CHARACTER_ERROR = "[JSONPond] the first character of given json content is neither starts with '{' or '['. Make sure the given content is valid JSON"
 
@@ -26,13 +53,12 @@ class JSONPond {
         private const val LETTER_N: Byte = 110
         private const val LETTER_T: Byte = 116
         private const val LETTER_F: Byte = 102
-        private const val QUOTATION: Byte = 34
         private const val COLON: Byte = 58
         private const val DECIMAL: Byte = 46
         private const val MINUS: Byte = 45
         private const val ESCAPE: Byte = 92
 
-        fun List<ByteArray>.joined(seperator: ByteArray): ByteArray {
+        private fun List<ByteArray>.joined(seperator: ByteArray): ByteArray {
             var finalArray = byteArrayOf()
             if(isEmpty()) {
                 return finalArray
@@ -45,14 +71,15 @@ class JSONPond {
             return finalArray
         }
 
-        private fun _serializeToBytes(node: Any?, index: Int, tabCount: Int) : ByteArray {
+        private fun _serializeToBytes(node: Any?, index: Int, tabCount: Int, stringDelimiter: Byte) : ByteArray {
             when (node) {
                 is Map<*, *> -> {
                     val innerContent: List<ByteArray> = node.map {
-                        byteArrayOf(QUOTATION) +
+                        byteArrayOf(stringDelimiter) +
                                 it.key.toString().toByteArray() +
-                                (if (tabCount != 0) byteArrayOf(QUOTATION, COLON, TAB) else byteArrayOf(QUOTATION, COLON)) +
-                                _serializeToBytes(it.value!!, index + 1, tabCount)
+                                (if (tabCount != 0) byteArrayOf(stringDelimiter, COLON, TAB) else byteArrayOf(
+                                    stringDelimiter, COLON)) +
+                                _serializeToBytes(it.value, index + 1, tabCount, stringDelimiter)
                     }
 
                     if (tabCount != 0 && innerContent.isNotEmpty()) {
@@ -70,7 +97,7 @@ class JSONPond {
                     return (byteArrayOf(OPEN_OBJECT) + (innerContent.joined(byteArrayOf(COMMA)))) + byteArrayOf(CLOSE_OBJECT)
                 }
                 is List<*> -> {
-                    val innerContent = node.map { _serializeToBytes(it!!, index + 1, tabCount) }
+                    val innerContent = node.map { _serializeToBytes(it, index + 1, tabCount, stringDelimiter) }
                     if (tabCount != 0 && innerContent.isNotEmpty()) {
                         val spacer: ByteArray = fillTab((index + 1) * tabCount)
                         val endSpacer: ByteArray = fillTab(index * tabCount)
@@ -86,7 +113,7 @@ class JSONPond {
                     return (byteArrayOf(OPEN_ARRAY) + innerContent.joined(byteArrayOf(COMMA))) + byteArrayOf(CLOSE_ARRAY)
                 }
                 is String -> {
-                    return byteArrayOf(QUOTATION) + node.toByteArray() + QUOTATION
+                    return byteArrayOf(stringDelimiter) + node.toByteArray() + stringDelimiter
                 }
                 is Boolean -> {
                     return if (node) byteArrayOf(LETTER_T, 114, 117, 101) else byteArrayOf(LETTER_F, 97, 108, 115, 101)
@@ -94,21 +121,28 @@ class JSONPond {
                 is Number -> {
                     return node.toString().toByteArray()
                 }
-                Constants.NULL -> {
+                null -> {
                     return byteArrayOf(LETTER_N, 117, 108, 108)
                 }
                 else -> {
-                    return byteArrayOf(QUOTATION, 35, 73, 78, 86, 65, 76, 73, 68, 95, 84, 89, 80, 69, QUOTATION)
+                    return byteArrayOf(stringDelimiter, 35, 73, 78, 86, 65, 76, 73, 68, 95, 84, 89, 80, 69, stringDelimiter)
                 }
             }
         }
 
-        fun write(jsonData: Any, prettify: Boolean = true) : JSONPond {
+        /**
+            write JSON content from scratch recursively. use mapOf and listOf() to write object and array content respectively.
+         */
+        fun write(jsonData: Any, prettify: Boolean = true) : JSONBlock {
+            val generatedBytes = _serializeToBytes(jsonData, 0, if (prettify) 4 else 0, 34)
+            if (generatedBytes[0] == 34.toByte()) {
+                return JSONBlock(generatedBytes, "string")
+            }
             val type = if (jsonData is Map<*, *>) "object" else "array"
-            return JSONPond(_serializeToBytes(jsonData, 0, if (prettify) 4 else 0), type)
+            return JSONBlock(generatedBytes, type)
         }
 
-        private  fun fillTab(repeatCount: Int) : ByteArray {
+        private fun fillTab(repeatCount: Int) : ByteArray {
             val array = ByteArray(repeatCount)
             array.fill(TAB)
             return  array
@@ -120,38 +154,20 @@ class JSONPond {
     private var contentType: String
     private var extractInnerContent = false
     private var intermediateSymbol: ByteArray = byteArrayOf(63, 63, 63)
-    private var errorHandler: ((error: ErrorCode, occurredIndex: Int) -> Unit)? = null
+    private var errorHandler: ((errorCode: ErrorCode, failedIndex: Int) -> Unit)? = null
     private var errorInfo:  Pair<ErrorCode, Int>? = null
     private var pathSplitter: Char = '.'
     private var typeMismatchWarningCount = 0
-    private var stringQuotationDelimter: QuotationDelimiter = QuotationDelimiter.singleQuotation
-
-
-    /*
-        Name attribute of this element in the parent object.
-     */
-    var key = ""
-
-    /*
-        Index of this element in the parent array.
-     */
-    var index = -1
-    private fun setKey(newKey: String) : JSONPond {
-        key = newKey
-        return this
-    }
-
-    private fun setIndex(newIndex: Int) : JSONPond {
-        index = newIndex
-        return this
-    }
+    private var QUOTATION: Byte = 34
 
     private data class ValueType(val value: ValueStore, val type: String)
+    data class JSONValueTypePair(val value: Any, val type: JSONType)
 
     private class ValueStore {
         var string: String = ""
         var bytes: ByteArray = byteArrayOf()
-        var array: Array<JSONPond> = arrayOf()
+        var array: Array<JSONBlock> = arrayOf()
+        var children: Array<JSONChild> = arrayOf()
         var tree: Any = listOf(0)
 
         constructor(input: String) {
@@ -163,8 +179,12 @@ class JSONPond {
             bytes = data
         }
 
-        constructor(arrayData: Array<JSONPond>) {
+        constructor(arrayData: Array<JSONBlock>) {
             array = arrayData
+        }
+
+        constructor(childData: Array<JSONChild>) {
+            children = childData
         }
 
         constructor(data: ByteWrapper) {
@@ -176,23 +196,23 @@ class JSONPond {
         }
     }
 
-    /*
+    /**
         Provide UTF string to read JSON content.
      */
     constructor(jsonString: String) {
-        jsonText = jsonString
-        contentType = when ((jsonText.first())) {
+        identifyStringDelimiter(jsonString)
+        contentType = when ((jsonString.firstOrNull())) {
             '{' -> "object"
             '[' -> "array"
             else -> {
-                print(INVALID_START_CHARACTER_ERROR)
+                println(INVALID_START_CHARACTER_ERROR)
                 "string"
             }
         }
         jsonData = jsonString.toByteArray()
     }
 
-    /*
+    /**
         Provide buffer pointer to the JSON content bytes.
      */
     constructor(jsonBufferPointer: ByteArray) {
@@ -201,7 +221,7 @@ class JSONPond {
             OPEN_OBJECT -> "object"
             OPEN_ARRAY -> "array"
             else -> {
-                print(INVALID_START_CHARACTER_ERROR)
+                println(INVALID_START_CHARACTER_ERROR)
                 "string"
             }
         }
@@ -209,53 +229,49 @@ class JSONPond {
 
     // ======= PRIVATE INITIALIZERS =====
 
-    private constructor(json: String, type: String) {
+    internal constructor(json: String, type: String) {
         jsonText = json
         contentType = type
         if (contentType == "object") {
+            identifyStringDelimiter(json)
             jsonData = json.toByteArray()
         }
     }
 
-    private constructor(json: ByteArray, type: String) {
+    internal constructor(json: ByteArray, type: String) {
         jsonText = ""
         contentType = type
         jsonData = json
     }
 
-    /*
+    /**
       Set token to represent intermediate paths.
      Intermediate token capture zero or more dynamic intermediate paths. Default token is ???.
     */
-    fun setIntermediateRepresent(representer: String) : JSONPond {
+    fun setIntermediateToken(representer: String) : JSONBlock {
         if (representer.toIntOrNull() != null) {
-            print("[JSONPond] intermediate represent strictly cannot be a number!")
+            println("[JSONPond] intermediate represent strictly cannot be a number!")
             return this
         }
         intermediateSymbol = representer.toByteArray()
         return this
     }
 
-    /*
+    /**
         Temporary make the next query string to be split by the character given. Useful in case of encountering object attribute containing dot notation in their names.
      */
-    fun splitQuery(by: Char) : JSONPond {
+    fun splitQuery(by: Char) : JSONBlock {
         pathSplitter = by
         return this
     }
 
-    public fun terminateNestedString(by: QuotationDelimiter) : JSONPond {
-        stringQuotationDelimter = by
-        return this
-    }
-    
-    private fun <T> getField(path: String?, fieldName: String, mapper: (ValueStore) -> T?, ignoreType: Boolean = false) : T? {
+    private fun <T> getField(path: String?, fieldName: String, mapper: (ValueStore) -> T?, ignoreType: Boolean = false, similarKeyMatch: Boolean) : T? {
         val (data, type) = if (path == null) ValueType(ValueStore(jsonText, jsonData), contentType) else decodeData(
-            path
+            path, ignoreCaseAndSpecialCharacters = similarKeyMatch
         ) ?: return null
-        if (!ignoreType && type != fieldName) {
+        if ((!ignoreType && type != fieldName) ||  (ignoreType && type != fieldName && type != "string")){
             if (typeMismatchWarningCount != 3) {
-                print("[JSONPond] type constrained query expected $fieldName but $type type value was read instead therefore returned nil. This warning will not be shown after 3 times per instance")
+                println("[JSONPond] type constrained query expected $fieldName but $type type value was read instead therefore returned null. This warning will not be shown after 3 times per instance")
                 typeMismatchWarningCount += 1
             }
             return null
@@ -263,88 +279,110 @@ class JSONPond {
         return mapper(data)
     }
 
-    /*
+    /**
         Get string value in the given path.
      */
-    fun string(path: String? = null) : String? =
-        getField(path, "string", { it.string })
+    fun string(path: String? = null, similarKeyMatch: Boolean = false) : String? =
+        getField(path, "string", { it.string }, similarKeyMatch = similarKeyMatch)
 
-    /*
+    /**
         Get number value in the given path. Note that double instance is given even if
          number is a whole integer type number.
      */
-    fun number(path: String? = null, ignoreType: Boolean = false) : Double? =
-        getField(path, "number", { it.string.toDoubleOrNull() }, ignoreType = ignoreType)
+    fun number(path: String? = null, ignoreType: Boolean = false, similarKeyMatch: Boolean = false) : Double? =
+        getField(path, "number", { it.string.toDoubleOrNull() }, ignoreType = ignoreType, similarKeyMatch = similarKeyMatch)
 
-    /*
+    /**
         Check if the element in the given addressed path represent a null value.
      */
-    fun isNull(path: String? = null) : Boolean? {
-        val type = if (path == null) contentType else decodeData(path)?.type ?: return null
+    fun isNull(path: String? = null, similarKeyMatch: Boolean = false) : Boolean? {
+        val type = if (path == null) contentType else decodeData(path, ignoreCaseAndSpecialCharacters = similarKeyMatch)?.type ?: return null
         return type == "null"
     }
 
-    /*
+    /**
         Get object in the given path. Activate ignoreType to parse string as json object.
      */
-    fun Object(path: String? = null, ignoreType: Boolean = false) : JSONPond? {
+    fun objectEntry(path: String? = null, ignoreType: Boolean = false, similarKeyMatch: Boolean = false) : JSONBlock? {
         if (path == null) {
-            return this
+            if(contentType == "object")
+                return this
+            else if(ignoreType && contentType == "string")
+                return JSONBlock(jsonText, "object")
+            println("[JSONPond] The content of this instance is not object type but $contentType type instead so null is given.")
+            return null
         }
-        return getField(path, "object", { if (ignoreType) JSONPond(replaceEscapedQuotations(it.string), "object") else JSONPond(it.bytes, "object") }, ignoreType = ignoreType)
+        return getField(path, "object", {
+            if (ignoreType && it.bytes.isEmpty()) {
+                return@getField JSONBlock(it.string, "object")
+            }
+            return@getField JSONBlock(it.bytes, "object")
+        }, ignoreType = ignoreType, similarKeyMatch = similarKeyMatch)
     }
 
-    /*
+    /**
         Get boolean value in the given path.
      */
-    fun bool(path: String? = null, ignoreType: Boolean = false) : Boolean? =
-        getField(path, "boolean", { it.string == "true" }, ignoreType = ignoreType)
+    fun bool(path: String? = null, ignoreType: Boolean = false,  similarKeyMatch: Boolean = false) : Boolean? =
+        getField(path, "boolean", { it.string == "true" }, ignoreType = ignoreType, similarKeyMatch = similarKeyMatch)
 
-    /*
-        Get collection of items either from array or object
+    /**
+        Get collection of items either from array or object. Gives array of [JSONChild] which each has property index and key.
      */
-        fun collection(path: String? = null, ignoreType: Boolean = false) : Array<JSONPond>? {
-            if (ignoreType) {
-                val content = getField(path, "string", {replaceEscapedQuotations(it.string)})
-                    ?: return null
-                return JSONPond(content).collection()
-            }
-            val data = decodeData(path ?: "", copyCollectionData = true)
-            if(data?.type != "CODE_COLLECTION") {
-                return null
-            }
-            return data.value.array
+    fun collection(path: String? = null, ignoreType: Boolean = false, similarKeyMatch: Boolean = false) : Array<JSONChild>? {
+        val data = decodeData(path ?: "",
+            copyCollectionData = true,
+            ignoreCaseAndSpecialCharacters = similarKeyMatch) ?: return null
+        if(ignoreType && data.type == "string") {
+            return JSONBlock(data.value.string).collection()
         }
-    /*
+        if(data.type != "CODE_COLLECTION") {
+            return null
+        }
+        return data.value.children
+    }
+    /**
         Check if attribute or element exists in given address path.
      */
-    fun isExist(path: String) : Boolean {
-        return decodeData(path) != null
+    fun isExist(path: String, similarKeyMatch: Boolean = false) : Boolean {
+        return decodeData(path, ignoreCaseAndSpecialCharacters = similarKeyMatch) != null
     }
 
-    private fun resolveValue(stringData: String, byteData: ByteArray, type: String, serialize: Boolean = false) : Any {
+    private fun resolveValue(stringData: String, byteData: ByteArray, type: String) : Any {
         return when ((type)) {
             "number" -> stringData.toDouble()
-            "array" -> JSONPond(byteData, "array").collection()!!
+            "array" -> JSONBlock(byteData, "array").collection()!!
             "boolean" -> stringData == "true"
             "null" -> Constants.NULL
             else -> stringData
         }
     }
 
-    /*
+    /**
         Read JSON element without type constraints.
          Similar to calling string(), array(), object() .etc but without knowing the data type
          of queried value. Returns castable any value along with data type
      */
-    fun any(path: String) : Pair<Any, JSONType>? {
-        val (value, type) = decodeData(path) ?: return null
+    fun any(path: String, similarKeyMatch: Boolean = false) : JSONValueTypePair? {
+        val (value, type) = decodeData(path, ignoreCaseAndSpecialCharacters = similarKeyMatch) ?: return null
         if (type == "object") {
-            return Pair(JSONPond(value.bytes, "object"), JSONType("object")!!)
+            return JSONValueTypePair(JSONBlock(value.bytes, "object"), JSONType("object")!!)
         }
-        return Pair(resolveValue(value.string, value.bytes, type), JSONType(type)!!)
+        return JSONValueTypePair(resolveValue(value.string, value.bytes, type), JSONType(type)!!)
     }
 
+    /**
+        Get collection all values on that matches the given path.
+    */
+    fun all(path: String, similarKeyMatch: Boolean = false): Array<JSONBlock> {
+        return decodeData(
+            path,
+            ignoreCaseAndSpecialCharacters =  similarKeyMatch,
+            grabAllPaths =  true
+        )?.value?.array ?: arrayOf()
+    }
+
+    /** Get the data type of the value held by the content of this node. */
     fun type() : JSONType =
         JSONType(contentType)!!
 
@@ -418,7 +456,8 @@ class JSONPond {
         nonNestableRootType("root data type is neither array or object and cannot transverse"),
         nonNestedParent("intermediate parent is a leaf node and non-nested. Cannot transverse further"),
         emptyQueryPath("query path cannot be empty at this query usage"),
-        captureUnknownElement("the path cannot be end with a intermediate representer"),
+        captureUnknownElement("the path cannot be end with a intermediate representer token"),
+        cannotFindElement("unable to find any element that matches the given path pattern"),
         other("something went wrong. Target element cannot be found");
 
         companion object {
@@ -426,20 +465,15 @@ class JSONPond {
         }
 
 
-        /// Provide string representation of error.
+        /** Provide string representation of error. */
         fun describe() : String =
-            "[${this}] ${rawValue}"
+            "[${this}] $rawValue"
     }
 
-    enum class QuotationDelimiter {
-        singleQuotation,
-        escapedDoubleQuotation
-    }
-
-    private fun _deleteData(iterator: ByteIterator, copiedData: ByteWrapper, tabUnitCount: Int, prevNotationBalnce: Int, pathCount: Int) {
+    private fun _deleteData(iterator: ByteIterator, copiedData: ByteWrapper, tabUnitCount: Int, prevNotationBalance: Int, pathCount: Int) {
         var didRemovedFirstComma = false
         var isInQuotes = false
-        var notationBalance = prevNotationBalnce
+        var notationBalance = prevNotationBalance
         var escapeCharacter = false
         while (iterator.hasNext()) {
             val char = copiedData.last()
@@ -529,16 +563,39 @@ class JSONPond {
         return ans
     }
 
-    private fun _splitPath(path: String) : MutableList<ByteArray> {
-        val paths: MutableList<ByteArray> = path.split(pathSplitter).map { it.toByteArray() }.toMutableList()
+    private fun _splitPath(path: String, makeIgnoreCases: Boolean = false) : MutableList<ByteArray> {
+        if(path.isBlank()) { return mutableListOf() }
+        var paths: MutableList<ByteArray> = mutableListOf()
+        if (makeIgnoreCases) {
+                paths = path.split(pathSplitter).map {
+                    val utfArray = it.toByteArray()
+                    if (utfArray.contentEquals(intermediateSymbol)) {
+                        return@map utfArray
+                    }
+                    var modifiedUtf = byteArrayOf()
+                    for (char in utfArray) {
+                        if ((char in 97..122)
+                            || (char in 48..57)
+                        ) {
+                            modifiedUtf += char
+                        } else if (char in 65..90) {
+                            modifiedUtf += (char + 32).toByte()
+                        }
+                    }
+                    return@map modifiedUtf
+                }.toMutableList()
+        } else {
+            paths = path.split(pathSplitter).map { it.toByteArray() }.toMutableList()
+        }
+
         if (pathSplitter != '.') {
             pathSplitter = '.'
         }
         return paths
     }
 
-    /// Attach a query fail listener to the next read or write query. Listener will be removed after single use.
-    fun onQueryFail(handler: (error: ErrorCode, querySegmentIndex: Int) -> Unit) : JSONPond {
+    /** Attach a query fail listener to the next read or write query. Listener will be removed after single use. */
+    fun onQueryFail(handler: (errorCode: ErrorCode, failedIndex: Int) -> Unit) : JSONBlock {
         errorHandler = handler
         return this
     }
@@ -557,7 +614,7 @@ class JSONPond {
             val endKeyPhrase: ByteArray = if (tabUnitCount == 0) byteArrayOf(QUOTATION, COLON) else byteArrayOf(QUOTATION, COLON, TAB)
             copiedBytes += endKeyPhrase
         }
-        var bytesToAdd = _serializeToBytes(dataToAdd, paths.size, tabUnitCount)
+        var bytesToAdd = _serializeToBytes(dataToAdd, paths.size, tabUnitCount, QUOTATION)
         if (!isIntermediateAdd) {
             if (tabUnitCount != 0) {
                 bytesToAdd += NEW_LINE
@@ -565,14 +622,29 @@ class JSONPond {
             }
             bytesToAdd += if (isInObject) CLOSE_OBJECT else CLOSE_ARRAY
         } else {
-            bytesToAdd += COMMA
+            // this was due to rare case when pushing to an empty array when push index is 0
+            var trialBytes = byteArrayOf()
+            while (iterator.hasNext()) {
+                val char = iterator.nextByte()
+                trialBytes += char
+                if (char != TAB && char != NEW_LINE) {
+                    if (char != CLOSE_ARRAY)
+                        bytesToAdd += COMMA
+                    else if (tabUnitCount != 0) {
+                        bytesToAdd += NEW_LINE
+                        bytesToAdd += fillTab((paths.size - 1) * tabUnitCount)
+                    }
+                    break
+                }
+            }
+            bytesToAdd += trialBytes
         }
         _continueCopyData(iterator, copiedBytes, bytesToAdd, dataType = 4)
         return null
     }
 
-    /// Update the given given query path.
-    fun update(path: String, data: Any) : JSONPond {
+    /** Update the given given query path.*/
+    fun replace(path: String, data: Any) : JSONBlock {
         errorInfo = _write(path, data, writeMode = UpdateMode.onlyUpdate)
         errorInfo?.apply {
             errorHandler?.invoke(this.first, this.second)
@@ -581,8 +653,10 @@ class JSONPond {
         return this
     }
 
-    /// Insert an element to the given query path. If the last segment of the path is an array then the element will be added to the array else if it's a nonexistent key then the key attribute will be added to the object.
-    fun insert(path: String, data: Any) : JSONPond {
+    /** Insert an element to the given query path. Last segment of the path should be attribute name to insert or update on objects.
+        On arrays last segment should be an index
+     */
+    fun push(path: String, data: Any) : JSONBlock {
         errorInfo = _write(path, data, writeMode = UpdateMode.onlyInsert)
         errorInfo?.apply {
             errorHandler?.invoke(this.first, this.second)
@@ -591,8 +665,8 @@ class JSONPond {
         return this
     }
 
-    /// Update or insert data to node of the given query path.
-    fun upsert(path: String, data: Any) : JSONPond {
+    /** Update or insert data to node of the given query path.*/
+    fun replaceOrPush(path: String, data: Any) : JSONBlock {
         errorInfo = _write(path, data, writeMode = UpdateMode.upsert)
         errorInfo?.apply {
             errorHandler?.invoke(this.first, this.second)
@@ -601,8 +675,8 @@ class JSONPond {
         return this
     }
 
-    /// delete path if exists. Return if delete successfull or not.
-    fun delete(path: String) : JSONPond {
+    /** delete path if exists. Return if delete successfully or not.*/
+    fun delete(path: String) : JSONBlock {
         errorInfo = _write(path, 0, writeMode = UpdateMode.delete)
         errorInfo?.apply {
             errorHandler?.invoke(this.first, this.second)
@@ -611,12 +685,12 @@ class JSONPond {
         return this
     }
 
-    /// Returns the content data as [Byte], map function parameter function optionally use to map the result with generic type.
+    /** Returns the content data as [ByteArray], map function parameter function optionally use to map the result with generic type.*/
     fun <R> bytes(mapFunction: ((ByteArray) -> R)) : R {
         return mapFunction(jsonData)
     }
 
-    /// Returns the content data as [Byte], map function parameter function optionally use to map the result with generic type.
+    /** Returns the content data as [ByteArray], map function parameter function optionally use to map the result with generic type.*/
     fun bytes() : ByteArray {
         return jsonData
     }
@@ -643,20 +717,23 @@ class JSONPond {
         var notationBalance = 0
         var processedindex = 0
         val paths: List<ByteArray> = _splitPath(path)
-        var copiedBytes = ByteWrapper(byteArrayOf())
+        val copiedBytes = ByteWrapper(byteArrayOf())
         var searchValue = 0
-        var iterator = jsonData.iterator()
-        if (paths.size == 0) {
+        val iterator = jsonData.iterator()
+        if (paths.isEmpty()) {
             return Pair(ErrorCode.emptyQueryPath, -1)
         }
         while (iterator.hasNext()) {
             val char = iterator.nextByte()
-           
+
             if (!isQuotes) {
                 if (char == OPEN_OBJECT || char == OPEN_ARRAY) {
                     notationBalance += 1
                     if (searchValue == 1) {
-                        val bytesToAdd = _serializeToBytes(data, paths.size, tabUnitCount)
+                        if (writeMode == UpdateMode.onlyInsert) {
+                            return Pair(ErrorCode.objectKeyAlreadyExists, processedindex - 1)
+                        }
+                        val bytesToAdd = _serializeToBytes(data, paths.size, tabUnitCount, QUOTATION)
                         _continueCopyData(iterator, copiedBytes, bytesToAdd, dataType = 0)
                         return null
                     } else if (char == OPEN_ARRAY && (processedindex + 1) == notationBalance) {
@@ -675,8 +752,13 @@ class JSONPond {
                             } else {
                                 searchValue = 2
                             }
-                        } else if (processedindex == (paths.size - 1) && (writeMode == UpdateMode.upsert || writeMode == UpdateMode.onlyInsert)) {
-                            return _addData(false, data, iterator, copiedBytes, tabUnitCount, paths)
+                        } else if (processedindex < paths.size - 1) {
+                            return Pair(ErrorCode.arrayIndexNotFound, processedindex)
+                        } else if (processedindex == (paths.size - 1)) {
+                            return if (writeMode == UpdateMode.upsert || writeMode == UpdateMode.onlyInsert)
+                                _addData(false, data, iterator, copiedBytes, tabUnitCount, paths)
+                            else
+                                Pair(ErrorCode.arrayIndexNotFound, processedindex)
                         }
                         continue
                     } else if (searchValue != 0) {
@@ -684,11 +766,11 @@ class JSONPond {
                     }
                 } else if (char == CLOSE_OBJECT || char == CLOSE_ARRAY) {
                     notationBalance -= 1
-                    if (processedindex == notationBalance) {
-                        if (processedindex + 1 == paths.size && (writeMode == UpdateMode.upsert || writeMode == UpdateMode.onlyInsert)) {
+                    if (processedindex >= notationBalance) {
+                        if (notationBalance + 1 == paths.size && (writeMode == UpdateMode.upsert || writeMode == UpdateMode.onlyInsert)) {
                             return _addData(char == CLOSE_OBJECT, data, iterator, copiedBytes, tabUnitCount, paths)
                         }
-                        return Pair(if (char == CLOSE_OBJECT) ErrorCode.objectKeyNotFound else ErrorCode.arrayIndexNotFound, processedindex)
+                        return Pair(if (char == CLOSE_OBJECT) ErrorCode.objectKeyNotFound else ErrorCode.arrayIndexNotFound, notationBalance)
                     }
                 } else if (char == COLON && (processedindex + 1) == notationBalance) {
                     if (paths[processedindex].contentEquals(grabbedKey)) {
@@ -709,7 +791,7 @@ class JSONPond {
                     if (writeMode == UpdateMode.onlyInsert) {
                         return Pair(ErrorCode.objectKeyAlreadyExists, processedindex - 1)
                     }
-                    val bytesToAdd = _serializeToBytes(data, paths.size, tabUnitCount)
+                    val bytesToAdd = _serializeToBytes(data, paths.size, tabUnitCount, QUOTATION)
                     _continueCopyData(iterator, copiedBytes, bytesToAdd, dataType = 3)
                     return null
                 }
@@ -721,9 +803,9 @@ class JSONPond {
                         return Pair(ErrorCode.nonNestedParent, processedindex - 1)
                     }
                     if (writeMode == UpdateMode.onlyInsert) {
-                        return Pair(ErrorCode.objectKeyAlreadyExists, paths.size - 2)
+                        return Pair(ErrorCode.objectKeyAlreadyExists, processedindex - 1)
                     }
-                    val bytesToAdd = _serializeToBytes(data, paths.size, tabUnitCount)
+                    val bytesToAdd = _serializeToBytes(data, paths.size, tabUnitCount, QUOTATION)
                     _continueCopyData(iterator, copiedBytes, bytesToAdd, dataType = 1)
                     return null
                 } else if ((processedindex + 1) == notationBalance) {
@@ -745,24 +827,69 @@ class JSONPond {
         return Pair(ErrorCode.other, processedindex)
     }
 
+    private fun _prettyifyContent(originalContent: ByteArray) : String {
+        var presentation = byteArrayOf()
+        var notationBalance = 0
+        var isEscaping = false
+        var isQuotes = false
 
-    /// Convert the selected element content to representable string.
-    fun stringify(path: String) : String? {
-        val result = decodeData(path)
+        if (originalContent[1] == NEW_LINE) {
+            return originalContent.decodeToString() // already being pretty
+        }
+        for (char in originalContent) {
+            if (!isEscaping && char == QUOTATION) {
+                isQuotes = !isQuotes
+            } else if (!isQuotes) {
+                if (char == OPEN_OBJECT || char == OPEN_ARRAY) {
+                    notationBalance += 1
+                    presentation += char
+                    presentation += NEW_LINE
+                    presentation += fillTab(notationBalance * 3)
+                    continue
+                } else if (char == CLOSE_OBJECT || char == CLOSE_ARRAY) {
+                    notationBalance -= 1
+                    presentation += NEW_LINE
+                    presentation += fillTab(notationBalance * 3)
+                } else if (char == COMMA) {
+                    presentation += char
+                    presentation += NEW_LINE
+                    presentation += fillTab(notationBalance * 3)
+                    continue
+                } else if (char == COLON) {
+                    presentation += char
+                    presentation += TAB
+                    continue
+                }
+            }
+
+            if (isEscaping) {
+                isEscaping = false
+            } else if (char == ESCAPE) {
+                isEscaping = true
+            }
+            presentation += char
+        }
+        return presentation.decodeToString()
+    }
+    /** Convert the selected element content to representable string.*/
+    fun stringify(path: String, similarKeyMatch: Boolean = false) : String? {
+        val result = decodeData(path, ignoreCaseAndSpecialCharacters = similarKeyMatch)
         if (result != null) {
-            return if (result.value.bytes.isEmpty()) result.value.string else result.value.bytes.decodeToString()
+            return if (result.type == "object" || result.type == "array") _prettyifyContent(result.value.bytes) else result.value.string
         }
         return null
     }
 
-    /// Convert the selected element content to representable string.
+    /** Convert the selected element content to representable string. */
     fun stringify() : String =
-        if (jsonData.isEmpty()) jsonText else jsonData.decodeToString()
+        if (contentType == "object" || contentType == "array") _prettyifyContent(jsonData) else jsonText
 
-    /// Get the natural value of JSON node. Elements expressed in associated swift type except
-    /// for null represented in `.Constants.NULL` based on their data type. Both array and
-    /// object are represented by dictionary and array respectively and their subelements are
-    /// parsed recursively until to singular values.
+    /**
+     Get the natural value of JSON node. Elements expressed in associated swift type except
+     for null represented in [Constants.NULL] based on their data type. Both array and
+     object are represented by dictionary and array respectively and their subelements are
+     parsed recursively until to singular values.
+     */
     fun parse() : Any {
         if (contentType == "object" || contentType == "array") {
             val iterator = jsonData.iterator()
@@ -771,24 +898,25 @@ class JSONPond {
         return resolveValue(jsonText, jsonData, contentType)
     }
 
-    /// Get natural value of an element for given path with data type. Similar to parse(path:).
-    fun parseWithType(path: String) : Pair<Any, JSONType>? {
+    /** Get natural value of an element for given path with data type. Similar to parse(path:). */
+    fun parseWithType(path: String, similarKeyMatch: Boolean = false) : JSONValueTypePair? {
         extractInnerContent = true
-        val (value, type) = decodeData(path) ?: return null
+        val (value, type) = decodeData(path, ignoreCaseAndSpecialCharacters = similarKeyMatch) ?: return null
         extractInnerContent = false
         if ((type == "object" || type == "array")) {
-            return Pair(value.tree, JSONType(type)!!)
+            return JSONValueTypePair(value.tree, JSONType(type)!!)
         }
-        return Pair(resolveValue(value.string, value.bytes, type), JSONType(type)!!)
+        return JSONValueTypePair(resolveValue(value.string, value.bytes, type), JSONType(type)!!)
     }
-
-    /// Get the natural value of JSON node. Elements expressed in associated swift type except
-    /// for null represented in `.Constants.NULL` based on their data type. Both array and
-    /// object are represented by dictionary and array respectively and their subelements are
-    /// parsed recursively until to singular values.
-    fun parse(path: String) : Any? {
+    /**
+     Get the natural value of JSON node. Elements expressed in associated swift type except
+     for null represented in `.Constants.NULL` based on their data type. Both array and
+     object are represented by dictionary and array respectively and their subelements are
+     parsed recursively until to singular values.
+     */
+    fun parse(path: String, similarKeyMatch: Boolean = false) : Any? {
         extractInnerContent = true
-        val (value, type) = decodeData(path) ?: return null
+        val (value, type) = decodeData(path, ignoreCaseAndSpecialCharacters = similarKeyMatch) ?: return null
         extractInnerContent = false
         if (type == "object" || type == "array") {
             return value.tree
@@ -796,14 +924,23 @@ class JSONPond {
         return resolveValue(value.string, value.bytes, type)
     }
 
-    /// Capture the node addressed by the given path.
-    fun capture(path: String) : JSONPond? {
-        val result = decodeData(path) ?: return null
-        return if (result.value.bytes.isEmpty()) JSONPond(result.value.string, result.type) else JSONPond(result.value.bytes, result.type)
+    /** Capture the node addressed by the given path. */
+    fun capture(path: String, similarKeyMatch: Boolean = false) : JSONBlock? {
+        val result = decodeData(path, ignoreCaseAndSpecialCharacters = similarKeyMatch) ?: return null
+        return if (result.value.bytes.isEmpty()) JSONBlock(result.value.string, result.type) else JSONBlock(result.value.bytes, result.type)
     }
 
-    private fun decodeData(inputPath: String, copyCollectionData: Boolean = false) : ValueType? {
-        val results = exploreData(inputPath, copyCollectionData)
+    private fun decodeData(
+        inputPath: String,
+        copyCollectionData: Boolean = false,
+        ignoreCaseAndSpecialCharacters: Boolean,
+        grabAllPaths: Boolean = false
+    ) : ValueType? {
+        val results = exploreData(
+            inputPath,
+            copyCollectionData,
+            ignoreCaseAndSpecialCharacters,
+            grabAllPaths)
         errorInfo?.apply {
             errorHandler?.invoke(this.first, this.second)
             errorHandler = null
@@ -834,7 +971,7 @@ class JSONPond {
         }
     }
 
-    class CollectionHolder(isObject: Boolean) {
+    private class CollectionHolder(isObject: Boolean) {
         var type: String
         var objectCollection: MutableMap<String, Any>
         var arrayCollection: MutableList<Any>
@@ -857,18 +994,18 @@ class JSONPond {
 
 
     private fun _getStructuredData(iterator: ByteIterator, firstCharacter: Byte) : ValueType {
-        var stack: MutableList<CollectionHolder> = mutableListOf()
+        val stack: MutableList<CollectionHolder> = mutableListOf()
         var isInQuotes = false
         var grabbedKey = ""
         var isGrabbingText = false
         var grabbedText = ""
         var notationBalance = 1
-        var shouldProccessObjectValue = false
+        var shouldProcessObjectValue = false
         var escapeCharacter = false
-        if (firstCharacter == OPEN_OBJECT) {
-            stack += CollectionHolder(isObject = true)
+        stack += if (firstCharacter == OPEN_OBJECT) {
+            CollectionHolder(isObject = true)
         } else {
-            stack += CollectionHolder(isObject = false)
+            CollectionHolder(isObject = false)
         }
 
         while (iterator.hasNext()) {
@@ -880,7 +1017,7 @@ class JSONPond {
                         stack.last().reservedObjectKey = grabbedKey
                     }
                     stack += CollectionHolder(isObject = char == OPEN_OBJECT)
-                    shouldProccessObjectValue = false
+                    shouldProcessObjectValue = false
                 } else if (char == CLOSE_OBJECT || char == CLOSE_ARRAY) {
                     notationBalance -= 1
                     if (isGrabbingText) {
@@ -894,7 +1031,7 @@ class JSONPond {
                     if (notationBalance == 0) {
                         return if (stack.first().type == "object") ValueType(ValueStore(parsedData = stack.last().objectCollection), "object") else ValueType(ValueStore(parsedData = stack.last().arrayCollection), "array")
                     }
-                    shouldProccessObjectValue = false
+                    shouldProcessObjectValue = false
                     val child = stack.removeLast()
                     if (stack.last().type == "object") {
                         stack.last().assignChildToObject(child)
@@ -902,7 +1039,7 @@ class JSONPond {
                         stack.last().appendChildToArray(child)
                     }
                 } else if (char == COLON) {
-                    shouldProccessObjectValue = true
+                    shouldProcessObjectValue = true
                     grabbedKey = grabbedText
                 }  else if (!isGrabbingText && ((char in 48..57) || char == MINUS || char == LETTER_T || char == LETTER_F || char == LETTER_N)) {
                     grabbedText = ""
@@ -914,7 +1051,7 @@ class JSONPond {
                     } else {
                         stack.last().arrayCollection += parseSingularValue(_trimSpace(grabbedText))
                     }
-                    shouldProccessObjectValue = false
+                    shouldProcessObjectValue = false
                 }
             }
             if (!escapeCharacter && char == QUOTATION) {
@@ -924,14 +1061,13 @@ class JSONPond {
                     grabbedText = ""
                 } else {
                     if (stack.last().type == "object") {
-                        if (shouldProccessObjectValue) {
-                            stack.last().objectCollection["fsdff"] = QUOTATION
+                        if (shouldProcessObjectValue) {
                             stack.last().objectCollection[grabbedKey] = grabbedText
                         }
                     } else {
                         stack.last().arrayCollection += grabbedText
                     }
-                    shouldProccessObjectValue = false
+                    shouldProcessObjectValue = false
                 }
             } else if (isGrabbingText) {
                 grabbedText += char.toInt().toChar()
@@ -947,7 +1083,7 @@ class JSONPond {
 
     private fun _iterateArray(iterator: ByteIterator, elementIndex: Int) : Boolean {
         var notationBalance = 1
-        var escapeChracter = false
+        var escapeCharacter = false
         var isQuotes = false
         var cursorIndex = 0
         if (elementIndex == 0) {
@@ -955,7 +1091,7 @@ class JSONPond {
         }
         while (iterator.hasNext()) {
             val char = iterator.nextByte()
-            if (!escapeChracter && char == QUOTATION) {
+            if (!escapeCharacter && char == QUOTATION) {
                 isQuotes = !isQuotes
             }
             if (!isQuotes) {
@@ -973,10 +1109,10 @@ class JSONPond {
                     }
                 }
             }
-            if (escapeChracter) {
-                escapeChracter = false
+            if (escapeCharacter) {
+                escapeCharacter = false
             } else if (char == ESCAPE) {
-                escapeChracter = true
+                escapeCharacter = true
             }
         }
         return false
@@ -984,7 +1120,7 @@ class JSONPond {
 
     private fun _iterateArrayWrite(iterator: ByteIterator, elementIndex: Int, copyingData: ByteWrapper) : Boolean {
         var notationBalance = 1
-        var escapeChracter = false
+        var escapeCharacter = false
         var isQuotes = false
         var cursorIndex = 0
         copyingData += OPEN_ARRAY
@@ -994,7 +1130,7 @@ class JSONPond {
 
         while (iterator.hasNext()) {
             val char = iterator.nextByte()
-            if (!escapeChracter && char == QUOTATION) {
+            if (!escapeCharacter && char == QUOTATION) {
                 isQuotes = !isQuotes
             }
             if (!isQuotes) {
@@ -1013,10 +1149,10 @@ class JSONPond {
                     }
                 }
             }
-            if (escapeChracter) {
-                escapeChracter = false
+            if (escapeCharacter) {
+                escapeCharacter = false
             } else if (char == ESCAPE) {
-                escapeChracter = true
+                escapeCharacter = true
             }
             copyingData += char
         }
@@ -1042,22 +1178,25 @@ class JSONPond {
                         return
                     }
                 }
+                if (char > TAB) {
+                    copiedData += char
+                }
+            } else {
+                copiedData += char
             }
             if(isEscape) {
                 isEscape = false
             } else if (char == ESCAPE) {
                 isEscape = true
             }
-            copiedData += char
         }
     }
 
-    private fun _getObjectEntries(iterator: ByteIterator) : Array<JSONPond> {
-        var values: Array<JSONPond> = arrayOf()
+    private fun _getObjectEntries(iterator: ByteIterator) : Array<JSONChild> {
+        var values: Array<JSONChild> = arrayOf()
         var bytes: ByteWrapper
         var text = ""
-        var isGrabbing = false
-        var dataType = ""
+        var dataType: String
         var isQuotes = false
         var grabbedKey = ""
         var isEscaping = false
@@ -1068,28 +1207,26 @@ class JSONPond {
                 isQuotes = !isQuotes
                 if (isQuotes) {
                     text = ""
-                    isGrabbing = true
                     continue
                 } else {
                     if (shouldGrabItem) {
                         shouldGrabItem = false
-                        values += JSONPond(text, "string").setKey(grabbedKey)
+                        values += JSONChild(text, "string").setKey(grabbedKey)
                     }
-                    isGrabbing = false
                 }
             } else if (!isQuotes) {
                 if (char == OPEN_OBJECT || char == OPEN_ARRAY) {
                     bytes = ByteWrapper(byteArrayOf(char))
                     dataType = if (char == OPEN_OBJECT) "object" else "array"
                     _grabData(bytes, iterator)
-                    values += JSONPond(bytes.bytes, dataType).setKey(grabbedKey)
+                    values += JSONChild(bytes.bytes, dataType).setKey(grabbedKey)
                     shouldGrabItem = false
                     continue
                 }
                 if (shouldGrabItem) {
                     val result =  _getPrimitive(iterator, char)
                     if(result != null) {
-                        values += JSONPond(result.second,result.first).setKey(grabbedKey)
+                        values += JSONChild(result.second,result.first).setKey(grabbedKey)
                         shouldGrabItem = false
                         if(result.third) {
                             return values
@@ -1102,7 +1239,7 @@ class JSONPond {
                 } else if (char == CLOSE_OBJECT) {
                     return values
                 }
-            } else if (isGrabbing) {
+            } else {
                 text += char.toInt().toChar()
             }
             if (isEscaping) {
@@ -1114,12 +1251,11 @@ class JSONPond {
         return values
     }
 
-    private fun _getArrayValues(iterator: ByteIterator) : Array<JSONPond> {
-        var values: Array<JSONPond> = arrayOf()
-        var bytes: ByteWrapper = ByteWrapper(byteArrayOf())
-        var text: String = ""
-        var isGrabbing = false
-        var dataType = ""
+    private fun _getArrayValues(iterator: ByteIterator) : Array<JSONChild> {
+        var values: Array<JSONChild> = arrayOf()
+        var bytes: ByteWrapper
+        var text = ""
+        var dataType: String
         var isQuotes = false
         var isEscaping = false
         var index = 0
@@ -1129,25 +1265,23 @@ class JSONPond {
                 isQuotes = !isQuotes
                 if (isQuotes) {
                     text = ""
-                    isGrabbing = true
                     continue
                 } else {
-                    values += JSONPond(text, "string").setIndex(index)
+                    values += JSONChild(text, "string").setIndex(index)
                     index += 1
-                    isGrabbing = false
                 }
             } else if (!isQuotes) {
                 if (char == OPEN_OBJECT || char == OPEN_ARRAY) {
                     bytes = ByteWrapper(byteArrayOf(char))
                     dataType = if (char == OPEN_OBJECT) "object" else "array"
                     _grabData(bytes, iterator)
-                    values += JSONPond(bytes.bytes, dataType).setIndex(index)
+                    values += JSONChild(bytes.bytes, dataType).setIndex(index)
                     index += 1
                     continue
                 }
                 val result = _getPrimitive(iterator, char)
                 if(result != null) {
-                    values += JSONPond(result.second, result.first).setIndex(index)
+                    values += JSONChild(result.second, result.first).setIndex(index)
                     index += 1
                     if(result.third) {
                         return values
@@ -1155,7 +1289,7 @@ class JSONPond {
                 } else if (char == CLOSE_ARRAY) {
                     return values
                 }
-            } else if (isGrabbing) {
+            } else {
                 text += char.toInt().toChar()
             }
             if (isEscaping) {
@@ -1174,12 +1308,12 @@ class JSONPond {
             return Triple("boolean", "false", false)
         } else if (firstCharacter == LETTER_N) {
             return Triple("null", "null", false)
-        } else if ((firstCharacter > 47 && firstCharacter < COLON) || firstCharacter == MINUS) {
+        } else if ((firstCharacter in 48 until COLON) || firstCharacter == MINUS) {
             var didContainerClosed = false
             var copiedNumber = "${firstCharacter.toInt().toChar()}"
             while (iterator.hasNext()) {
                 val num = iterator.nextByte()
-                if ((num > 47 && num < COLON) || num == DECIMAL) {
+                if ((num in 48 until COLON) || num == DECIMAL) {
                     copiedNumber += num.toInt().toChar()
                 } else {
                     if(num == CLOSE_ARRAY || num == CLOSE_OBJECT) {
@@ -1193,7 +1327,7 @@ class JSONPond {
         return null
     }
 
-    class ByteWrapper(var bytes: ByteArray) {
+    private class ByteWrapper(var bytes: ByteArray) {
         operator fun plusAssign(byteArray: ByteArray) {
             bytes = bytes.plus(byteArray)
         }
@@ -1212,7 +1346,16 @@ class JSONPond {
         }
     }
 
-    private fun exploreData(inputPath: String, copyCollectionData: Boolean) : ValueType? {
+    private fun _singleItemList(source: JSONBlock): ValueType {
+        return ValueType(ValueStore(arrayOf(source)), "CODE_ALL")
+    }
+
+    private fun exploreData(
+        inputPath: String,
+        copyCollectionData: Boolean,
+        ignoreCaseAndSpecialCharacters: Boolean,
+        grabAllPaths: Boolean
+    ) : ValueType? {
         errorInfo = null
         if (!(contentType == "object" || contentType == "array")) {
             errorInfo = Pair(ErrorCode.nonNestableRootType, 0)
@@ -1223,28 +1366,42 @@ class JSONPond {
             return this.copyOfRange(0, lastIndex)
         }
 
-        val paths: MutableList<ByteArray> = _splitPath(inputPath)
+        val paths: MutableList<ByteArray> = _splitPath(inputPath, makeIgnoreCases = ignoreCaseAndSpecialCharacters)
         var processedPathIndex = 0
         var isNavigatingUnknownPath = false
         var advancedOffset = 0
-        var tranversalHistory: Array<Pair<Int, Int>> = arrayOf()
+        var traversalHistory: Array<Pair<Int, Int>> = arrayOf()
         var isInQuotes = false
         var startSearchValue = false
         var isGrabbingText = false
         var grabbedText = ""
         var grabbedBytes: ByteWrapper
         var grabbingKey: ByteArray = byteArrayOf()
-        var needProccessKey = false
+        var needProcessKey = false
         var isGrabbingKey = false
         var notationBalance = 0
-        var grabbingDataType: String = "string"
-        var escapeCharacter: Boolean = false
+        var grabbingDataType: String
+        var escapeCharacter = false
+        var commonPathCollections: Array<JSONBlock> = arrayOf()
+
+        fun restoreLastPointIfNeeded(): Boolean {
+            if (traversalHistory.isNotEmpty()){
+                traversalHistory[traversalHistory.size - 1].apply {
+                    processedPathIndex = this.first
+                    advancedOffset = this.second
+                }
+                startSearchValue = false
+                isNavigatingUnknownPath = true
+                return true
+            }
+            return false
+        }
 
         if (paths.size == 0 && !copyCollectionData) {
             errorInfo = Pair(ErrorCode.emptyQueryPath, -1)
             return null
         }
-        if (paths.last().contentEquals(intermediateSymbol)) {
+        if (paths.lastOrNull().contentEquals(intermediateSymbol)) {
             errorInfo = Pair(ErrorCode.captureUnknownElement, paths.size - 1)
             return null
         }
@@ -1262,28 +1419,33 @@ class JSONPond {
                         }
                         if (copyCollectionData) {
                             if (char == OPEN_OBJECT) {
-                                return ValueType(ValueStore(arrayData = _getObjectEntries(iterator)), "CODE_COLLECTION")
+                                return ValueType(ValueStore(childData = _getObjectEntries(iterator)), "CODE_COLLECTION")
                             }
-                            return ValueType(ValueStore(arrayData = _getArrayValues(iterator)), "CODE_COLLECTION")
+                            return ValueType(ValueStore(childData = _getArrayValues(iterator)), "CODE_COLLECTION")
                         }
                         grabbedBytes = ByteWrapper(byteArrayOf(char))
                         grabbingDataType = if (char == OPEN_OBJECT) "object" else "array"
                         _grabData(grabbedBytes, iterator)
+                        if (grabAllPaths) {
+                            if (restoreLastPointIfNeeded()) {
+                                commonPathCollections += JSONBlock(grabbedBytes.bytes, grabbingDataType)
+                                continue
+                            }
+                            return _singleItemList(JSONBlock(grabbedBytes.bytes, grabbingDataType))
+                        }
                         return ValueType(ValueStore(grabbedBytes), grabbingDataType)
                     }
-                    // intiate elements counting inside array on reaching open bracket...
+                    if (paths[processedPathIndex].contentEquals(intermediateSymbol)) {
+                        isNavigatingUnknownPath = true
+                        traversalHistory += Pair(processedPathIndex, advancedOffset)
+                        paths.removeAt(processedPathIndex)
+                    }
+                    // initiate elements counting inside array on reaching open bracket...
                     if (char == OPEN_ARRAY && ((advancedOffset + 1) == notationBalance || isNavigatingUnknownPath)) {
                         val parsedIndex = _toNumber(paths[processedPathIndex])
                         // occur when trying to access element of array with non-number index
                         if (parsedIndex == null) {
-                            if (paths[processedPathIndex].contentEquals(intermediateSymbol)) {
-                                paths.removeAt(processedPathIndex)
-                                isNavigatingUnknownPath = true
-                                tranversalHistory += Pair(processedPathIndex, advancedOffset)
-                                continue
-                            } else if (isNavigatingUnknownPath) {
-                                continue
-                            }
+                            if (isNavigatingUnknownPath || restoreLastPointIfNeeded()) { continue }
                             errorInfo = Pair(ErrorCode.invalidArrayIndex, processedPathIndex)
                             return null
                         }
@@ -1292,19 +1454,19 @@ class JSONPond {
                             advancedOffset = notationBalance - 1
                         }
                         if (!_iterateArray(iterator, elementIndex = parsedIndex)) {
-                            if (tranversalHistory.isNotEmpty()) {
-                                if (tranversalHistory.size != 1) {
-                                    tranversalHistory = tranversalHistory.dropLast()
+                            if (traversalHistory.isNotEmpty()) {
+                                if (traversalHistory.size != 1) {
+                                    traversalHistory = traversalHistory.dropLast()
                                     paths.add(processedPathIndex, intermediateSymbol)
                                 }
-                                tranversalHistory[tranversalHistory.size - 1].apply {
+                                traversalHistory[traversalHistory.size - 1].apply {
                                     processedPathIndex = this.first
                                     advancedOffset = this.second
                                 }
                                 isNavigatingUnknownPath = true
                                 continue
                             }
-                            errorInfo = Pair(ErrorCode.arrayIndexNotFound, paths.size - 1)
+                            errorInfo = Pair(ErrorCode.arrayIndexNotFound, processedPathIndex)
                             return null
                         }
                         processedPathIndex += 1
@@ -1313,35 +1475,41 @@ class JSONPond {
                     } else {
                         // move to next nest object and start looking attribute key on next nested object...
                         startSearchValue = false
-                        if (paths[processedPathIndex].contentEquals(intermediateSymbol)) {
-                            isNavigatingUnknownPath = true
-                            tranversalHistory += Pair(processedPathIndex, advancedOffset)
-                            paths.removeAt(processedPathIndex)
-                        }
                     }
                     continue
                 }
                 if (char == CLOSE_OBJECT || char == CLOSE_ARRAY) {
                     notationBalance -= 1
                     // occur after all element in focused array or object is finished searching...
-                    if (notationBalance == advancedOffset) {
-                        // exit occur after no matching key is found in object
-                        if (char == CLOSE_OBJECT) {
-                            if (tranversalHistory.isNotEmpty()) {
-                                if (tranversalHistory.size != 1) {
-                                    tranversalHistory = tranversalHistory.dropLast()
-                                    paths.add(processedPathIndex, intermediateSymbol)
+                    if (notationBalance <= advancedOffset) {
+
+                            // first - processedPathIndex
+                            // second - advancedOffset
+                            if (traversalHistory.isNotEmpty()) {
+                                if (traversalHistory.last().second <= advancedOffset) {
+                                    paths.add(traversalHistory.last().first, intermediateSymbol)
+                                    traversalHistory = traversalHistory.dropLast()
+
+                                    if(traversalHistory.isEmpty()) {
+                                        if (grabAllPaths) {
+                                            return ValueType(ValueStore(commonPathCollections), "CODE_ALL")
+                                        }
+                                        errorInfo = Pair(ErrorCode.cannotFindElement, notationBalance)
+                                        return null
+                                    }
                                 }
-                                tranversalHistory[tranversalHistory.size - 1].apply {
+                                traversalHistory.last().apply {
                                     processedPathIndex = this.first
                                     advancedOffset = this.second
                                 }
                                 isNavigatingUnknownPath = true
                                 continue
                             }
-                            errorInfo = Pair(ErrorCode.objectKeyNotFound, paths.size - 1)
-                            return null
-                        }
+                        errorInfo = Pair(
+                            if (char == CLOSE_OBJECT)  ErrorCode.objectKeyNotFound else ErrorCode.arrayIndexNotFound,
+                            notationBalance
+                        )
+                        return null
                     }
                     continue
                 }
@@ -1353,16 +1521,25 @@ class JSONPond {
                     // ignore escaped double quotation characters inside string values...
                     if (!escapeCharacter && char == QUOTATION) {
                         isInQuotes = !isInQuotes
-                        // if not the last proccesed value skip caturing value
+                        // if not the last processed value skip capturing value
                         if (processedPathIndex != paths.size) {
+                            if(restoreLastPointIfNeeded()) {
+                                continue
+                            }
                             errorInfo = Pair(ErrorCode.nonNestedParent, processedPathIndex - 1)
                             return null
                         }
                         isGrabbingText = !isGrabbingText
                         if (!isGrabbingText) {
+                            if (grabAllPaths) {
+                                if (restoreLastPointIfNeeded()) {
+                                    commonPathCollections += JSONBlock(grabbedText, "string")
+                                    continue
+                                }
+                                return _singleItemList(JSONBlock(grabbedText, "string"))
+                            }
                             return ValueType(ValueStore(grabbedText), "string")
                         } else {
-                            grabbingDataType = "string"
                             grabbedText = ""
                         }
                     } else // used to copy values true, false, null and number
@@ -1372,8 +1549,18 @@ class JSONPond {
                             val result = _getPrimitive(iterator, char)
                             if (result != null) {
                                 if (processedPathIndex != paths.size) {
+                                    if(restoreLastPointIfNeeded()) {
+                                        continue
+                                    }
                                     errorInfo = Pair(ErrorCode.nonNestedParent, processedPathIndex - 1)
                                     return null
+                                }
+                                if(grabAllPaths) {
+                                    if(restoreLastPointIfNeeded()) {
+                                        commonPathCollections += JSONBlock(result.second, result.first)
+                                        continue
+                                    }
+                                    return _singleItemList(JSONBlock(result.second, result.first))
                                 }
                                 return ValueType(ValueStore(result.second), result.first)
                             }
@@ -1390,17 +1577,31 @@ class JSONPond {
                     isInQuotes = !isInQuotes
                     // grabbing the matching correct object key as given in path
                     if ((advancedOffset + 1) == notationBalance || isNavigatingUnknownPath) {
-                        isGrabbingKey = !isGrabbingKey
+                        isGrabbingKey = isInQuotes
                         if (isGrabbingKey) {
                             grabbingKey = byteArrayOf()
                         } else {
-                            needProccessKey = true
+                            needProcessKey = true
                         }
                     }
                 } else if (isGrabbingKey) {
-                    grabbingKey += char
-                } else if (needProccessKey && char == COLON) {
-                    needProccessKey = false
+                    if (ignoreCaseAndSpecialCharacters) {
+                        when (char) {
+                            in 48..57 -> {
+                                grabbingKey += char
+                            }
+                            in 65..90 -> {
+                                grabbingKey += (char + 32).toByte()
+                            }
+                            in 97..122 -> {
+                                grabbingKey += char
+                            }
+                        }
+                    } else {
+                        grabbingKey += char
+                    }
+                } else if (needProcessKey && char == COLON) {
+                    needProcessKey = false
                     // if found start searching for object value for object key
                     if (grabbingKey.contentEquals(paths[processedPathIndex])) {
                         processedPathIndex += 1
@@ -1424,35 +1625,12 @@ class JSONPond {
         return null
     }
 
-    private fun replaceEscapedQuotations(text: String) : String {
-        var replaced = ""
-        var escaped = false
-
-        if (stringQuotationDelimter == QuotationDelimiter.escapedDoubleQuotation) {
-            for (char in text) {
-                if (char == '\\') {
-                    escaped = true
-                } else if (escaped) {
-                    if (char == '\"') {
-                        replaced += "\""
-                    } else {
-                        replaced += "\\"
-                        replaced += char
-                    }
-                    escaped = false
-                } else {
-                    replaced += char
-                }
-            }
-        } else {
-            for (char in text) {
-                if (char == '\'') {
-                    replaced += "\""
-                } else {
-                    replaced += char
-                }
+    private fun identifyStringDelimiter(text: String) {
+        for (char in text) {
+            if(char == '"' || char == '\'') {
+                QUOTATION = if(char == '"')  34 else 39
+                break
             }
         }
-        return replaced
     }
 }

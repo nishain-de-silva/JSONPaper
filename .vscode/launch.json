@@ -5,10 +5,11 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "type": "java",
-            "name": "Launch Java Program",
+            "type": "kotlin",
             "request": "launch",
-            "mainClass": ""
+            "name": "Kotlin Launch",
+            "projectRoot": "${workspaceFolder}",
+            "mainClass": "src.test.kotlin.JSONPondTests.kt"
         },
         {
             "type": "lldb",

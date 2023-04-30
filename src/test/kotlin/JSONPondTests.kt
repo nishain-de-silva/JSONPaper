@@ -1,22 +1,21 @@
 import org.junit.Test
 import java.io.File
 
-class JSONPondTest {
-    @Test
+class JSONBlockTest {
+     @Test
     fun startTest() {
         val fileName = "test2.json"
-        val data = File("./src/test/swift/$fileName").readBytes()
-//        val entity = JSONEntity(data)
-//        entity.onQueryFail { error, querySegmentIndex -> println(error.describe()) }
-        val result = JSONPond.write(mapOf(
-            "name" to mapOf(
-                "first" to "nishain",
-                "last" to "de silva"
-            ),
-            "age" to Null,
-            "hobbies" to listOf("first", "second", listOf<String>())
-        ))
-        result.insert("hobbies.2.0", "walking")
-        println(result.stringify())
+        val data = File("./src/test/swift/$fileName").readBytes().decodeToString()
+
+        val pond = JSONBlock(data)
+        val result = pond.
+            onQueryFail {
+                errorCode, failedIndex -> println("${errorCode.describe()} at $failedIndex")
+            }
+            .stringify()
+         println(result)
+//        val result = pond.onQueryFail { error, querySegmentIndex -> println("$querySegmentIndex ${error.describe()}") }
+//            .all("root.???.listenedon",true).map { it.parse() }
+//         println(result)
     }
 }

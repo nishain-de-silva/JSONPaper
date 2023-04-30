@@ -30,7 +30,7 @@ dependencies {
 //             release(MavenPublication) {
 //                 from components.release
 //                 groupId 'com.ndds'
-//                 artifactId 'JSONStore'
+//                 artifactId 'JSONPond'
 //                 version '1.0.0'
 //             }
 //         }
