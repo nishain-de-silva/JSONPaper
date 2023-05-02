@@ -122,19 +122,22 @@ As said before JSONPond is good at handling unknown JSON structures which means 
 
 ### Check value existence
 
-You can use `isExist(:path)` which will give either returns a boolean or an optional reference to the current instance if the path exists (You can only do this on Swift for now - language restrictions:>). In other words, you can,
+You can use `isExist(:path)` to test if a element given on the path exists, alternatively you can use `isExistThen(:path)` if you want to chain based on the result.
 ```swift
 // normal conditional use
 if entity.isExist("somePath") {
     // do some work
 }
 // or chain based on condition
-entity.isExist("somePath")?.stringify()
+guard let newEntity = entity.isExistThen("testPath")?.push("testPath", "new value") else {
+    print("error - path does not exist")
+    return
+}
 ```
 ## Parsing data types
 
-For `number`, `boolean`, `object`, and `array` query methods you can parse these values from JSON string by using the `ignoreType` parameter (default `false`)
-- for booleans, the string values must be `"true"` or `"false"` (case-sensitive) only.
+For every read query methods you can parse string values into their respective JSON value by using the `ignoreType` parameter (default `false`).
+- for `boolean` and `null` the string values must be `"true"`, `"false"` and `null` (lower-case) only.
 - When parsing `object` and `array` the nested delimiter which is automatically detected can be either by single or double quotes.
 
 ```json
@@ -142,7 +145,9 @@ For `number`, `boolean`, `object`, and `array` query methods you can parse these
     "pathA": {
         "numString": "35"
     },
-    "sampleData": "{'inner': 'awesome'}"
+    "sampleData": "{'inner': 'awesome'}",
+    // or 
+    "sampleData": "{\"inner\": \"awesome\"}"
 }
 ```
 
@@ -349,16 +354,17 @@ let value = reference.capture(attributePath)?.string()
 
 ## Error Listeners
 
-JSONPond also allows adding a fail listener before calling a read or write a query to catch possible errors. Error callback gives you a tuple consisting of 2 values: 
+JSONPond also allows adding a fail listener before calling a read or write a query to catch possible errors. Error callback gives you a object consisting of 3 values: 
 - The error code
 - Index of the query fragment where the issue has been detected from the query path.
+- query path which error has occured.
+
 In the below example if the field `name` is actually a `string` instead of a nested `object` then JSONPond will give you an error
 
 ```swift
 let result = entity
     .onQueryFail({
-        print($0.errorCode.describe())
-        print("occurred on the index:", $0.failedIndex)
+        print($0.explain())
     })
     .replace(
         "user.details.name.first", "Joe"
@@ -368,8 +374,9 @@ let result = entity
 ```
 would give you an output:
 ```
-[nonNestedParent] intermediate parent is a leaf node and non-nested. Cannot transverse further
-occurred on the index: 2
+[nonNestedParent] occurred on query path (user.details.name.first)
+        At attribute index 2
+        Reason: intermediate parent is a leaf node and non-nested. Cannot transverse further
 {
     "user": {
         "details": {
@@ -378,7 +385,39 @@ occurred on the index: 2
     }
 }
 ```
-So it indicates the error happen on index 2 which means the "name" segment in the query and the error itself is an enum value `ErrorCode.nonNestedParent`. You can use these enum constants to catch a specific type of error.
+So it indicates the error happen on index 2 which means the "name" segment in the query and the error itself is an enum value like in here - `ErrorCode.nonNestedParent`. You can use these enum constants to catch a specific type of error.
+
+### Bubbling errors from child nodes
+
+In default behavior `JSONPond` instance look for a fresh error handler when an error got invoked and if there is no error handler it would ignore the error and return `nil `/ `null` nevertheless. This is most of the time not an issue but what happens if you use a call that returns fresh inline `JSONPond` instances?
+
+```swift
+let result = entity
+    .onQueryFail({
+        // error handler will not work
+        print($0.explain())
+    })
+    .capture("user") // this call generate fresh instance
+    .replace(
+        "details.name.first", "Joe"
+    ) // error discarded as no error callback defined on the current instance
+    .stringify()
+```
+let result = entity
+You can either provide `onFail` callback just before calling `.replace()` or enable the `bubbling` parameter on the top-level `onQueryFail` callback,
+```swift
+let result = entity
+    .onQueryFail({
+        // error handler will not work
+        print($0.explain())
+    }, bubbling: true)
+    .capture("user") // bottom error will be forwarded to top
+    .replace(
+        "details.name.first", "Joe"
+    )
+    .stringify()
+```
+this will make errors invoked under the child element escalate to the top level unless error handler unless you explicitly define an error handler on one of the child nodes on their own which would break the bubbling chain.
 
 ## Dumping Data
 
@@ -390,3 +429,17 @@ If you find this library useful and got impressed please feel free to like this 
 @Nishain De Silva
 
 `Thoughts` -   _**"** I recently found out it is difficult to parse `JSON` on type-constrained language unlike in `JavaScript` so I ended up inventing a library for my purpose! So I thought maybe others face the same problem and why not make others also have a `taste` of what I created and keep on adding more features to make JSON reading with less hassle.**"**_ :sunglasses:
+
+## FAQ
+
+**What is the differance between using `capture()` and `any()` ?**
+
+While it is tempting to think both give result irrespective of data type `any()` gives the natural of the node meaning if it is a boolean then it would give either true or false while `capture()` deliver wrapped value as `JSONBlock`.
+
+**When to use `parse()` and why it is distinguished from `any()` method ?**
+
+Both intend to give natural value but `parse()` extends beyond `any()` when giving natural value. Both give the same output when it comes to singular values (string, boolean, null, and numbers)  but when it comes to objects and arrays `any()` still delivers values wrapped in `JSONBlock` but `parse()` recursively add `dictionary` and `array`. So in general, `any()` is used is same as calling to other read query method but without knowing the data type, and `parse()` is used for serialization purposes and to deliver serialized data and handle them with native types only (`Array` `Dictionary`, `String` .etc)
+
+**After dicovering a instance is iterable with `type()` how to iterate it afterwards ?**
+
+You can `collection(:path)` without the `path` parameter which would give all child elements within itself. If you want to filter elements that contain specific sub-path you can use the `all()` method instead.

@@ -154,14 +154,23 @@ open class JSONBlock {
     private var contentType: String
     private var extractInnerContent = false
     private var intermediateSymbol: ByteArray = byteArrayOf(63, 63, 63)
-    private var errorHandler: ((errorCode: ErrorCode, failedIndex: Int) -> Unit)? = null
+    private var errorHandler: ((ErrorInfo) -> Unit)? = null
     private var errorInfo:  Pair<ErrorCode, Int>? = null
     private var pathSplitter: Char = '.'
-    private var typeMismatchWarningCount = 0
+    private var isBubbling: Boolean = false
     private var QUOTATION: Byte = 34
 
     private data class ValueType(val value: ValueStore, val type: String)
     data class JSONValueTypePair(val value: Any, val type: JSONType)
+
+    data class ErrorInfo(val errorCode: ErrorCode, val failedIndex: Int, val path: String) {
+        fun explain(): String {
+            if (path.isNotEmpty()) {
+                return "[$errorCode] occurred on query path ($path)\n\tAt attribute index $failedIndex\n\tReason: ${errorCode.rawValue}"
+            }
+            return "[$errorCode] occurred on root node itself\n\tReason: ${errorCode.rawValue}"
+        }
+    }
 
     private class ValueStore {
         var string: String = ""
@@ -270,9 +279,13 @@ open class JSONBlock {
             path, ignoreCaseAndSpecialCharacters = similarKeyMatch
         ) ?: return null
         if ((!ignoreType && type != fieldName) ||  (ignoreType && type != fieldName && type != "string")){
-            if (typeMismatchWarningCount != 3) {
-                println("[JSONPond] type constrained query expected $fieldName but $type type value was read instead therefore returned null. This warning will not be shown after 3 times per instance")
-                typeMismatchWarningCount += 1
+            if(errorHandler != null) {
+                errorHandler?.invoke(
+                    ErrorInfo(ErrorCode.nonMatchingDataType,
+                    (path?.split(pathSplitter)?.size ?: 0) -1,
+                    path ?: ""
+                    )
+                )
             }
             return null
         }
@@ -307,17 +320,30 @@ open class JSONBlock {
         if (path == null) {
             if(contentType == "object")
                 return this
-            else if(ignoreType && contentType == "string")
-                return JSONBlock(jsonText, "object")
-            println("[JSONPond] The content of this instance is not object type but $contentType type instead so null is given.")
+            else if(ignoreType && contentType == "string") {
+                val element = JSONBlock(jsonText, "object")
+                if (isBubbling) {
+                    element.isBubbling = true
+                    element.errorHandler = errorHandler
+                }
+                return element
+            }
+            if(errorHandler != null) {
+                errorHandler?.invoke(ErrorInfo(ErrorCode.nonMatchingDataType, -1, ""))
+            }
             return null
         }
-        return getField(path, "object", {
+        val element = getField(path, "object", {
             if (ignoreType && it.bytes.isEmpty()) {
                 return@getField JSONBlock(it.string, "object")
             }
             return@getField JSONBlock(it.bytes, "object")
         }, ignoreType = ignoreType, similarKeyMatch = similarKeyMatch)
+        if (isBubbling) {
+            element?.isBubbling = true
+            element?.errorHandler = errorHandler
+        }
+        return element
     }
 
     /**
@@ -337,6 +363,14 @@ open class JSONBlock {
             return JSONBlock(data.value.string).collection()
         }
         if(data.type != "CODE_COLLECTION") {
+            if(errorHandler != null) {
+                errorHandler?.invoke(
+                    ErrorInfo(ErrorCode.nonMatchingDataType,
+                        (path?.split(pathSplitter)?.size ?: 0) -1,
+                        path ?: ""
+                    )
+                )
+            }
             return null
         }
         return data.value.children
@@ -346,6 +380,13 @@ open class JSONBlock {
      */
     fun isExist(path: String, similarKeyMatch: Boolean = false) : Boolean {
         return decodeData(path, ignoreCaseAndSpecialCharacters = similarKeyMatch) != null
+    }
+
+    /**
+        Gives the current instance optionally based on if given path exist.
+     */
+    fun isExistThen(path: String, similarKeyMatch: Boolean = false) : JSONBlock? {
+        return if(decodeData(path, ignoreCaseAndSpecialCharacters = similarKeyMatch) != null) this else null
     }
 
     private fun resolveValue(stringData: String, byteData: ByteArray, type: String) : Any {
@@ -453,6 +494,7 @@ open class JSONBlock {
         arrayIndexNotFound("cannot find given index within array bounds"),
         invalidArrayIndex("array index is not a integer number"),
         objectKeyAlreadyExists("cannot insert because object attribute already exists"),
+        nonMatchingDataType("the data type of value of the value does not match with expected data type that is required from query method"),
         nonNestableRootType("root data type is neither array or object and cannot transverse"),
         nonNestedParent("intermediate parent is a leaf node and non-nested. Cannot transverse further"),
         emptyQueryPath("query path cannot be empty at this query usage"),
@@ -594,9 +636,11 @@ open class JSONBlock {
         return paths
     }
 
-    /** Attach a query fail listener to the next read or write query. Listener will be removed after single use. */
-    fun onQueryFail(handler: (errorCode: ErrorCode, failedIndex: Int) -> Unit) : JSONBlock {
+    /** Attach a query fail listener to the next read or write query. Listener will be removed after single use.
+     *Bubbling enable inline child element to inherit this error handler enabling fail invoked on child nodes captured by given error handler.*/
+    fun onQueryFail(handler: (ErrorInfo) -> Unit, bubbling: Boolean = false) : JSONBlock {
         errorHandler = handler
+        isBubbling = bubbling
         return this
     }
 
@@ -647,7 +691,7 @@ open class JSONBlock {
     fun replace(path: String, data: Any) : JSONBlock {
         errorInfo = _write(path, data, writeMode = UpdateMode.onlyUpdate)
         errorInfo?.apply {
-            errorHandler?.invoke(this.first, this.second)
+            errorHandler?.invoke(ErrorInfo(this.first, this.second, path))
             errorHandler = null
         }
         return this
@@ -659,7 +703,7 @@ open class JSONBlock {
     fun push(path: String, data: Any) : JSONBlock {
         errorInfo = _write(path, data, writeMode = UpdateMode.onlyInsert)
         errorInfo?.apply {
-            errorHandler?.invoke(this.first, this.second)
+            errorHandler?.invoke(ErrorInfo(this.first, this.second, path))
             errorHandler = null
         }
         return this
@@ -669,7 +713,7 @@ open class JSONBlock {
     fun replaceOrPush(path: String, data: Any) : JSONBlock {
         errorInfo = _write(path, data, writeMode = UpdateMode.upsert)
         errorInfo?.apply {
-            errorHandler?.invoke(this.first, this.second)
+            errorHandler?.invoke(ErrorInfo(this.first, this.second, path))
             errorHandler = null
         }
         return this
@@ -679,7 +723,7 @@ open class JSONBlock {
     fun delete(path: String) : JSONBlock {
         errorInfo = _write(path, 0, writeMode = UpdateMode.delete)
         errorInfo?.apply {
-            errorHandler?.invoke(this.first, this.second)
+            errorHandler?.invoke(ErrorInfo(this.first, this.second, path))
             errorHandler = null
         }
         return this
@@ -927,7 +971,12 @@ open class JSONBlock {
     /** Capture the node addressed by the given path. */
     fun capture(path: String, similarKeyMatch: Boolean = false) : JSONBlock? {
         val result = decodeData(path, ignoreCaseAndSpecialCharacters = similarKeyMatch) ?: return null
-        return if (result.value.bytes.isEmpty()) JSONBlock(result.value.string, result.type) else JSONBlock(result.value.bytes, result.type)
+        val element = if (result.value.bytes.isEmpty()) JSONBlock(result.value.string, result.type) else JSONBlock(result.value.bytes, result.type)
+        if(isBubbling) {
+            element.isBubbling = true
+            element.errorHandler = errorHandler
+        }
+        return element
     }
 
     private fun decodeData(
@@ -942,7 +991,7 @@ open class JSONBlock {
             ignoreCaseAndSpecialCharacters,
             grabAllPaths)
         errorInfo?.apply {
-            errorHandler?.invoke(this.first, this.second)
+            errorHandler?.invoke(ErrorInfo(this.first, this.second, inputPath))
             errorHandler = null
         }
         return results

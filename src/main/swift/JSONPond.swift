@@ -38,16 +38,35 @@ public class JSONBlock {
     private static let INVALID_START_CHARACTER_ERROR = "[JSONPond] the first character of given json content is neither starts with '{' or '['. Make sure the given content is valid JSON"
     private static let INVALID_BUFFER_INITIALIZATION = "[JSONPond] instance has not properly initialized. Problem had occured when assigning input data buffer which occur when the provider callback given on .init(provider:) gives nil or when exception thrown within provider callback itself. Check the result given by by provider callback to resolve the issue."
     
+    public class ErrorInfo {
+        public var errorCode: ErrorCode
+        public var failedIndex: Int
+        public var path: String
+        
+        fileprivate init(_ errorCode: ErrorCode, _ failedIndex: Int, _ path: String) {
+            self.errorCode = errorCode
+            self.failedIndex = failedIndex
+            self.path = path
+        }
+        
+        public func explain() -> String {
+            if path.count > 0 {
+                return "[\(errorCode)] occurred on query path (\(path))\n\tAt attribute index \(failedIndex)\n\tReason: \(errorCode.rawValue)"
+            }
+            return "[\(errorCode)] occurred on root node itself\n\tReason: \(errorCode.rawValue)"
+        }
+    }
+    
     private var jsonText: String = ""
     private var jsonData: UnsafeRawBufferPointer = UnsafeRawBufferPointer.init(start: nil, count: 0)
     private var jsonDataMemoryHolder: [UInt8] = []
     private var contentType:String
     private var extractInnerContent = false
     private var intermediateSymbol: [UInt8] = [63, 63, 63]
-    private var errorHandler: (((ErrorCode, Int)) -> Void)? = nil
+    private var errorHandler: ((ErrorInfo) -> Void)? = nil
     private var errorInfo: (code: ErrorCode, occurredQueryIndex: Int)? = nil
     private var pathSpliter: Character = "."
-    private var typeMismatchWarningCount = 0
+    private var isBubbling: Bool = false
     private var QUOTATION: UInt8 = 34
     
     private class ValueStore {
@@ -184,9 +203,13 @@ public class JSONBlock {
     private func getField <T>(_ path: String?, _ fieldName: String, _ mapper: (ValueStore) -> T?, ignoreType:Bool = false, similarKeyMatch: Bool) -> T? {
         guard let (data, type) = path == nil ? (ValueStore(jsonText, jsonDataMemoryHolder), contentType) : decodeData(path!, ignoreCaseAndSpecialCharacters: similarKeyMatch) else { return nil; }
         if (!ignoreType && type != fieldName) || (ignoreType && type != fieldName && type != "string") {
-            if typeMismatchWarningCount != 3 {
-                print("[JSONPond] type constrained query expected \(fieldName) but \(type) type value was read instead therefore returned nil. This warning will not be shown after 3 times per instance")
-                typeMismatchWarningCount += 1
+            if errorHandler != nil {
+                errorHandler!(ErrorInfo(
+                    ErrorCode.nonMatchingDataType,
+                    (path?.split(separator: pathSpliter).count ?? 0) - 1,
+                    path ?? ""
+                ))
+                errorHandler = nil
             }
             return nil
         }
@@ -218,18 +241,31 @@ public class JSONBlock {
             if contentType == "object" {
                 return self
             } else if ignoreType && contentType == "string" {
-                return JSONBlock(jsonText, "object")
+                let element = JSONBlock(jsonText, "object")
+                if isBubbling {
+                    element.isBubbling = true
+                    element.errorHandler = errorHandler
+                }
+                return element
             }
-            print("[JSONPond] The content of this instance is not object type but \(contentType) type instead so nil is given.")
+            if errorHandler != nil {
+                errorHandler!(ErrorInfo(ErrorCode.nonMatchingDataType, -1, ""))
+                errorHandler = nil
+            }
             return nil
         }
-        return getField(path, "object", {
+        let element = getField(path, "object", {
             // have to make sure value is string and not bytes...
             if ignoreType && $0.memoryHolder.count == 0 {
                 return JSONBlock($0.string, "object")
             }
             return JSONBlock($0.memoryHolder, "object")
         }, ignoreType: ignoreType, similarKeyMatch: similarKeyMatch)
+        if isBubbling {
+            element?.isBubbling = true
+            element?.errorHandler = errorHandler
+        }
+        return element
     }
     
     /// Get boolean value in the given path.
@@ -249,6 +285,14 @@ public class JSONBlock {
             return JSONBlock(data.value.string).collection()
         }
         if data.type != "CODE_COLLECTION" {
+            if errorHandler != nil {
+                errorHandler!(ErrorInfo(
+                    ErrorCode.nonMatchingDataType,
+                    (path?.split(separator: pathSpliter).count ?? 0) - 1,
+                    path ?? ""
+                ))
+                errorHandler = nil
+            }
             return nil
         }
         return data.value.children
@@ -261,8 +305,8 @@ public class JSONBlock {
         return decodeData(path, ignoreCaseAndSpecialCharacters: similarKeyMatch) != nil
     }
     
-    /// Check if attribute or element exists in given address path.
-    public func isExist(_ path:String, similarKeyMatch: Bool = false) -> JSONBlock? {
+    /// Gives the current instance optionally based on if given path exist.
+    public func isExistThen(_ path:String, similarKeyMatch: Bool = false) -> JSONBlock? {
         return decodeData(path, ignoreCaseAndSpecialCharacters: similarKeyMatch) != nil ? self : nil
     }
     
@@ -428,6 +472,7 @@ public class JSONBlock {
         case arrayIndexNotFound = "cannot find given index within array bounds"
         case invalidArrayIndex = "array index is not a integer number"
         case objectKeyAlreadyExists = "cannot insert because object attribute already exists"
+        case nonMatchingDataType = "the data type of value of the value does not match with expected data type that is required from query method"
         case nonNestableRootType = "root data type is neither array or object and cannot transverse"
         case nonNestedParent = "intermediate parent is a leaf node and non-nested. Cannot transverse further"
         case emptyQueryPath = "query path cannot be empty at this query usage"
@@ -568,8 +613,10 @@ public class JSONBlock {
     }
     
     /// Attach a query fail listener to the next read or write query. Listener will be removed after single use.
-    public func onQueryFail(_ handler: @escaping ((errorCode: ErrorCode, failedIndex: Int)) -> Void) -> JSONBlock {
+    /// bubbling enable inline child element to inherit this error handler enabling fail invoked on child nodes captured by given error handler.
+    public func onQueryFail(_ handler: @escaping (ErrorInfo) -> Void, bubbling: Bool = false) -> JSONBlock {
         errorHandler = handler
+        isBubbling = bubbling
         return self
     }
     
@@ -622,8 +669,8 @@ public class JSONBlock {
     /// Update the given given query path.
     public func replace(_ path: String, _ data: Any) -> JSONBlock {
         errorInfo = _write(path, data, writeMode: .onlyUpdate)
-        if errorInfo != nil {
-            errorHandler?(errorInfo!)
+        if let errorInfo {
+            errorHandler?(ErrorInfo(errorInfo.code, errorInfo.occurredQueryIndex, path))
             errorHandler = nil
         }
         return self
@@ -633,8 +680,8 @@ public class JSONBlock {
     /// Insert an element to the given query path. Last segment of the path can be attribute name to insert or update else and index if handling arrays.
     public func push(_ path: String, _ data: Any) -> JSONBlock {
         errorInfo = _write(path, data, writeMode: .onlyInsert)
-        if errorInfo != nil {
-            errorHandler?(errorInfo!)
+        if let errorInfo {
+            errorHandler?(ErrorInfo(errorInfo.code, errorInfo.occurredQueryIndex, path))
             errorHandler = nil
         }
         return self
@@ -644,8 +691,8 @@ public class JSONBlock {
     /// Update or insert data to node of the given query path.
     public func replaceOrPush(_ path: String, _ data: Any) -> JSONBlock {
         errorInfo = _write(path, data, writeMode: .upsert)
-        if errorInfo != nil {
-            errorHandler?(errorInfo!)
+        if let errorInfo {
+            errorHandler?(ErrorInfo(errorInfo.code, errorInfo.occurredQueryIndex, path))
             errorHandler = nil
         }
         return self
@@ -655,8 +702,8 @@ public class JSONBlock {
     /// delete path if exists. Return if delete successfully or not.
     public func delete(_ path: String) -> JSONBlock {
         errorInfo = _write(path, 0, writeMode: .delete)
-        if errorInfo != nil {
-            errorHandler?(errorInfo!)
+        if let errorInfo {
+            errorHandler?(ErrorInfo(errorInfo.code, errorInfo.occurredQueryIndex, path))
             errorHandler = nil
         }
         return self
@@ -899,9 +946,13 @@ public class JSONBlock {
     /// Capture the node addressed by the given path.
     public func capture(_ path: String, similarKeyMatch: Bool = false) -> JSONBlock? {
         guard let result = decodeData(path, ignoreCaseAndSpecialCharacters: similarKeyMatch) else { return nil }
-        return result.type == "object" || result.type == "array" ?
+        let element =  result.type == "object" || result.type == "array" ?
         JSONBlock(result.value.memoryHolder, result.type) : JSONBlock(result.value.string, result.type)
-            
+        if isBubbling {
+            element.isBubbling = true
+            element.errorHandler = errorHandler
+        }
+        return element
     }
     
     ///Gell collection all values on that matches the given path.
@@ -911,8 +962,8 @@ public class JSONBlock {
     
     private func decodeData(_ inputPath:String, copyCollectionData: Bool = false, ignoreCaseAndSpecialCharacters: Bool, grabAllPaths: Bool = false) -> (value: ValueStore, type: String)? {
         let results = exploreData(inputPath, copyCollectionData, ignoreCaseAndSpecialCharacters, grabAllPaths)
-        if errorInfo != nil {
-            errorHandler?(errorInfo!)
+        if let errorInfo {
+            errorHandler?(ErrorInfo(errorInfo.code, errorInfo.occurredQueryIndex, inputPath))
             errorHandler = nil
         }
         return results

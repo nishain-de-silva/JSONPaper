@@ -41,11 +41,12 @@ final class JSONPondTest: XCTestCase {
 //            print(dummy.type(), dummy.parse())
             let result = JSONBlock(jsonData.withUnsafeBytes)
                 .onQueryFail({
-                    print($0.errorCode.describe(), $0.failedIndex)
-                })
-                .capture("root.another.???.temperature")!
-                .objectEntry(nil, ignoreType: true)?.parse()
-            print(result)
+                    print($0.explain())
+                }, bubbling: true)
+                
+                .capture("user.details.name.first")?
+                .stringify()
+            print(result ?? "nothing")
             print("elapsed time - ", Date().timeIntervalSince(start))
         } catch {
             print(error)

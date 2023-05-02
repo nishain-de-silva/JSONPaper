@@ -1,4 +1,9 @@
 {
+   "user": {
+      "details": {
+         "name": "kamal"
+      }
+   },
    "root": {
       "another": [
          34,
