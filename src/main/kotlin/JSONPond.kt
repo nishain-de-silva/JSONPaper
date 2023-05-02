@@ -257,7 +257,7 @@ open class JSONBlock {
       Set token to represent intermediate paths.
      Intermediate token capture zero or more dynamic intermediate paths. Default token is ???.
     */
-    fun setIntermediateToken(representer: String) : JSONBlock {
+    fun setIntermediateGroupToken(representer: String) : JSONBlock {
         if (representer.toIntOrNull() != null) {
             println("[JSONPond] intermediate represent strictly cannot be a number!")
             return this

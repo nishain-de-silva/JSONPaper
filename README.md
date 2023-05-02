@@ -146,8 +146,7 @@ For every read query methods you can parse string values into their respective J
         "numString": "35"
     },
     "sampleData": "{'inner': 'awesome'}",
-    // or 
-    "sampleData": "{\"inner\": \"awesome\"}"
+    "sampleData2": "{\"inner\": \"awesome\"}"
 }
 ```
 
@@ -196,7 +195,7 @@ While it is possible to check the existence of intermediate properties condition
 let path = "root.???.age"
 ```
 The `???` token is an `intermediate representer` to represent generic **zero or more** intermediate paths which can be either **object key** or **array index**.
-You can customize the `intermediate representer` token with another string with `setIntermediateToken` with another custom string - the default token string is `???` (In case one of the object attributes also happen to be named `???` !).
+You can customize the `intermediate representer` token with another string with `setIntermediateGroupToken` with another custom string - the default token string is `???` (In case one of the object attributes also happen to be named `???` !).
 
 You can also use multiple `intermediate representer` tokens like this,
 ```swift
@@ -403,7 +402,6 @@ let result = entity
     ) // error discarded as no error callback defined on the current instance
     .stringify()
 ```
-let result = entity
 You can either provide `onFail` callback just before calling `.replace()` or enable the `bubbling` parameter on the top-level `onQueryFail` callback,
 ```swift
 let result = entity
@@ -440,6 +438,6 @@ While it is tempting to think both give result irrespective of data type `any()`
 
 Both intend to give natural value but `parse()` extends beyond `any()` when giving natural value. Both give the same output when it comes to singular values (string, boolean, null, and numbers)  but when it comes to objects and arrays `any()` still delivers values wrapped in `JSONBlock` but `parse()` recursively add `dictionary` and `array`. So in general, `any()` is used is same as calling to other read query method but without knowing the data type, and `parse()` is used for serialization purposes and to deliver serialized data and handle them with native types only (`Array` `Dictionary`, `String` .etc)
 
-**After dicovering a instance is iterable with `type()` how to iterate it afterwards ?**
+**After dicovering a instance is an iterable with using `type()` how to iterate it afterwards ?**
 
 You can `collection(:path)` without the `path` parameter which would give all child elements within itself. If you want to filter elements that contain specific sub-path you can use the `all()` method instead.
