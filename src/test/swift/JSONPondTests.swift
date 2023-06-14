@@ -29,17 +29,9 @@ final class JSONPondTest: XCTestCase {
         do {
             let jsonData = try Data(contentsOf: URL(fileURLWithPath: path!))
             let start = Date()
-//            let dummy = JSONBlock.write([
-//                 "name": [
-//                     "first": "nishin",
-//                     "last": "de silva"
-//                 ],
-//                 "others": nil,
-//                 "age": 23,
-//                 "hobbies": ["first", nil, "second", []]
-//             ])
-//            print(dummy.type(), dummy.parse())
-            let result = JSONBlock(jsonData.withUnsafeBytes)
+            let pond = JSONBlock(jsonData.withUnsafeBytes)
+            pond.onQueryFail(<#T##handler: (ErrorInfo) -> Void##(ErrorInfo) -> Void#>)
+            let result = pond
                 .onQueryFail({
                     print($0.explain())
                 })

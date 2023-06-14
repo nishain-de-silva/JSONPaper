@@ -31,7 +31,7 @@ publishing {
         mavenJava(MavenPublication){
             groupId = 'io.github.nishain-de-silva'
             artifactId = 'jsonpond'
-            version = '2.7.0'
+            version = '2.8.0'
 
             from components.java
 
@@ -49,7 +49,6 @@ publishing {
                     developer {
                         id = 'nishain'
                         name = 'Nishain De Silva'
-                        email = localProperties['email']
                     }
                 }
                 scm {
@@ -62,8 +61,10 @@ publishing {
     }
     repositories {
         maven {
+            def release = 'https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/'
+            def snapshot = 'https://s01.oss.sonatype.org/content/repositories/snapshots/'
             name = 'OSSRH'
-            url = 'https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/'
+            url = release
             credentials {
                 username = localProperties['sonatypeUsername']
                 password = localProperties['sonatypePassword']

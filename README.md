@@ -1,4 +1,4 @@
-# JSONPond (v2.7) :rocket:
+# JSONPond (v2.8) :rocket:
 ![](https://img.shields.io/badge/Support-Swift-f16430)
 ![](https://img.shields.io/badge/install-Swift_Package_Manager-f16430)
 ![](https://img.shields.io/badge/Support-Kotlin-6b6dd7)
@@ -20,7 +20,7 @@ Gradle script
 
 ```groovy
 dependencies    {
-    implmementation("") // will be added soon...
+    implmementation("io.github.nishain-de-silva:jsonpond:2.8.0")
 }
 
 ```
@@ -118,10 +118,13 @@ let stringArray = entity.array("pathToArray.studentNames").map({ item in
 ```
 ## Approximate attribute matching
 
-As said before JSONPond is good at handling unknown JSON structures which means in situations you sometimes know the attribute name to search for but you are not sure about case-sensitivity or special characters involved eg: you know about an attribute with the name `studentId` but not sure if its actually `studentID` or `student_Id` or `student-ID`. When adding queries you can use double path split to make specic segment case-insensitive behavior **and** ignore all non-alphanumeric characters.
+As said before JSONPond is good at handling unknown JSON structures which means in situations you sometimes know the attribute name to search for but you are not sure about case-sensitivity or special characters involved eg: you know about an attribute with the name `studentId` but not sure if its actually `studentID` or `student_Id` or `student-ID`. When adding queries you can use **double split** to make JSONPond match specific node by ignoring case-sensitivity **and** all non-alphanumeric characters.
 ```swift
 let id = entry.string("details.students.12..studentId")
-// '..' notation identify studentId attribute case-insensitive and alphanumeric
+/* 
+'..' notation match attribute 'studentId' case-insensitive and match case with alphanumeric characters only. 
+Other nodes - details, students .etc are matched in normal precise behavior
+*/
 ```
 
 ### Check value existence
@@ -419,7 +422,9 @@ let result = entity
     )
     .stringify()
 ```
-this will make errors invoked under the child element escalate to the top level unless error handler unless you explicitly define an error handler on one of the child nodes on their own which would break the bubbling chain.
+this will make errors invoked under the child element escalate to the top level unless error handler unless you explicitly define an error handler on one of the nested child nodes on their own which would break the bubbling chain.
+
+> It is recommended to use `bubbling` paramter only when chaining functions with inline instances. This is because all nested children use linked reference to original listener which would retain memory upto to super parent where the error handler is defined. If you assign a child sperately in memory locatino then memory will not be released till you deallocate that child instance.
 
 ## Dumping Data
 

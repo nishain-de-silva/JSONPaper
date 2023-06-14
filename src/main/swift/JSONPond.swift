@@ -309,8 +309,7 @@ public class JSONBlock {
     }
 
     /// Attach a query fail listener to the next read or write query. Listener will be removed after single use.
-    /// Bubbling enable inline child element to inherit this error handler enabling fail invoked on child nodes captured by parent or by this error handler.
-    /// Bubbling only applicable for child instances synthesized by `capture` and `objectEntry` methods.
+    /// Bubbling enable inline generated instances to inherit this error handler.
     public func onQueryFail(_ handler: @escaping (ErrorInfo) -> Void, bubbling: Bool = false) -> JSONBlock {
         base.errorHandler = handler
         base.isBubbling = bubbling
