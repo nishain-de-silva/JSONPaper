@@ -118,7 +118,11 @@ let stringArray = entity.array("pathToArray.studentNames").map({ item in
 ```
 ## Approximate attribute matching
 
-As said before JSONPond is good at handling unknown JSON structures which means in situations you sometimes know the attribute name to search for but you are not sure about case-sensitivity or special characters involved eg: you know about an attribute with the name `studentId` but not sure if its actually `studentID` or `student_Id` or `student-ID`. In every query function, there is `similarKeyMatch` optional boolean parameter whether to match attribute names in case-insensitive behavior **and** ignore all non-alphanumeric characters.
+As said before JSONPond is good at handling unknown JSON structures which means in situations you sometimes know the attribute name to search for but you are not sure about case-sensitivity or special characters involved eg: you know about an attribute with the name `studentId` but not sure if its actually `studentID` or `student_Id` or `student-ID`. When adding queries you can use double path split to make specic segment case-insensitive behavior **and** ignore all non-alphanumeric characters.
+```swift
+let id = entry.string("details.students.12..studentId")
+// '..' notation identify studentId attribute case-insensitive and alphanumeric
+```
 
 ### Check value existence
 
@@ -195,7 +199,7 @@ While it is possible to check the existence of intermediate properties condition
 let path = "root.???.age"
 ```
 The `???` token is an `intermediate representer` to represent generic **zero or more** intermediate paths which can be either **object key** or **array index**.
-You can customize the `intermediate representer` token with another string with `setIntermediateGroupToken` with another custom string - the default token string is `???` (In case one of the object attributes also happen to be named `???` !).
+You can customize the `intermediate representer` token with another string with `representIntermediateGroups` with another custom string - the default token string is `???` (In case one of the object attributes also happen to be named `???` !).
 
 You can also use multiple `intermediate representer` tokens like this,
 ```swift

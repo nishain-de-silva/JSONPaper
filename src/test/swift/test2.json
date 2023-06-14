@@ -1,20 +1,15 @@
 {
-   "user": {
-      "details": {
-         "name": "kamal"
-      }
-   },
-   "root": {
+   "ROOT": {
       "another": [
          34,
          true,
          {
-            "sample": [     ],
+            "sample": [],
             "waking": "['good morning nishain', null, -2.34, +45, false]",
             "meta": {
                "point": "test"
             },
-            "day": 24,
+            "$%#day": 24,
             "dota": "temper\\\"ature",
             "temperature": 56,
             "moredetails": {

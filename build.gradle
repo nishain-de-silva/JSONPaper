@@ -1,38 +1,88 @@
-buildscript {
-    repositories {
-        mavenCentral()
-    }
-    dependencies {
-        classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:1.7.10'
-    }
+plugins {
+    id 'java-library'
+    id 'org.jetbrains.kotlin.jvm' version '1.7.10'
+    id 'maven-publish'
+    id 'signing'
 }
+
 
 repositories {
     mavenCentral()
-}
-
-apply plugin: 'java-library'
-apply plugin: 'org.jetbrains.kotlin.jvm'
-apply plugin: 'maven-publish'
-
-java {
-    sourceCompatibility = JavaVersion.VERSION_1_7
-    targetCompatibility = JavaVersion.VERSION_1_7
 }
 
 dependencies {
     testImplementation 'junit:junit:4.12'
 }
 
-// afterEvaluate {
-//     publishing {
-//         publications {
-//             release(MavenPublication) {
-//                 from components.release
-//                 groupId 'com.ndds'
-//                 artifactId 'JSONPond'
-//                 version '1.0.0'
-//             }
-//         }
-//     }
-// }
+
+java {
+    withJavadocJar()
+    withSourcesJar()
+
+    sourceCompatibility = JavaVersion.VERSION_1_7
+    targetCompatibility = JavaVersion.VERSION_1_7
+}
+
+def localProperties = new Properties()
+localProperties.load(file("local.properties").newDataInputStream())
+
+publishing {
+    publications{
+        mavenJava(MavenPublication){
+            groupId = 'io.github.nishain-de-silva'
+            artifactId = 'jsonpond'
+            version = '2.7.0'
+
+            from components.java
+
+            pom {
+                name = 'JSONPond'
+                description =  'JSON library to read and write properties in aesthetic way'
+                url = 'https://github.com/nishain-de-silva/JSONPond/tree/main'
+                licenses {
+                    license {
+                        name = 'The Apache License, Version 2.0'
+                        url = 'http://www.apache.org/licenses/LICENSE-2.0.txt'
+                    }
+                }
+                developers {
+                    developer {
+                        id = 'nishain'
+                        name = 'Nishain De Silva'
+                        email = localProperties['email']
+                    }
+                }
+                scm {
+                    connection = 'scm:git:git://nishain-de-silva/JSONPond.git'
+                    developerConnection = 'scm:git:ssh://nishain-de-silva/JSONPond.git'
+                    url = 'https://github.com/nishain-de-silva/JSONPond/'
+                }
+            }
+        }
+    }
+    repositories {
+        maven {
+            name = 'OSSRH'
+            url = 'https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/'
+            credentials {
+                username = localProperties['sonatypeUsername']
+                password = localProperties['sonatypePassword']
+            }
+        }
+
+    }
+}
+
+ signing() {
+    def signingKey = localProperties["signingKey"]
+    def signingPassword = localProperties["signingPassword"]
+
+    useInMemoryPgpKeys(signingKey, file('secretkey.gpg').getText(), signingPassword)
+    sign publishing.publications.mavenJava
+}
+
+javadoc {
+    if(JavaVersion.current().isJava9Compatible()) {
+        options.addBooleanOption('html5', true)
+    }
+}

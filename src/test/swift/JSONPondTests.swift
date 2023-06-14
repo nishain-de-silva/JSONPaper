@@ -42,10 +42,9 @@ final class JSONPondTest: XCTestCase {
             let result = JSONBlock(jsonData.withUnsafeBytes)
                 .onQueryFail({
                     print($0.explain())
-                }, bubbling: true)
-                
-                .capture("user.details.name.first")?
-                .stringify()
+                })
+                .collection("..root.another")?.map({$0.string("bakerville")})
+            
             print(result ?? "nothing")
             print("elapsed time - ", Date().timeIntervalSince(start))
         } catch {

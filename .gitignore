@@ -11,5 +11,6 @@ DerivedData/
 .swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
 .netrc
 local.properties
+secretkey.gpg
 .gradle
 src/test/swift/large-file.json
