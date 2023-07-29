@@ -1,3 +1,4 @@
+import Foundation
 /// JSONBlock representation of Null
 public enum Constants {
     case NULL
@@ -91,7 +92,7 @@ public class JSONBlock {
             base.contentType = "string"
         }
         base.jsonData = UnsafeRawBufferPointer(start: base.jsonText.withUTF8({$0}).baseAddress, count: base.jsonText.count)
-        base.identifyStringDelimter(jsonString)
+        base.identifyStringDelimiter(jsonString)
     }
     
     /// Provide buffer pointer to the JSON content bytes.
@@ -106,13 +107,9 @@ public class JSONBlock {
         }
     }
     
-    /// Provide mirror callback to recieve UnsafeRawBufferPointer instance.
-    public init(_ provider:  ((UnsafeRawBufferPointer?) throws -> UnsafeRawBufferPointer?) throws -> UnsafeRawBufferPointer?) {
-        guard let buffer = try? provider({$0}) else {
-            print(JSONBlock.INVALID_BUFFER_INITIALIZATION)
-            base.contentType = "string"
-            return
-        }
+    /// Provide Data that contain JSON data
+    public init (_ data: Data) {
+        let buffer = data.withUnsafeBytes({$0})
         base.jsonData = buffer
         switch(base.jsonData.first) {
         case 123: base.contentType = "object"
@@ -123,22 +120,51 @@ public class JSONBlock {
         }
     }
     
-    /// Provide mirror callback to receive UnsafeRawBufferPointer instance.
-    public init(_ provider:  ((UnsafeRawBufferPointer?)  -> UnsafeRawBufferPointer?) -> UnsafeRawBufferPointer?) {
-        guard let buffer = provider({$0}) else {
-            print(JSONBlock.INVALID_BUFFER_INITIALIZATION)
-            base.contentType = "string"
-            return
-        }
-        base.jsonData = buffer
-        switch(base.jsonData.first) {
-        case 123: base.contentType = "object"
-        case 91: base.contentType = "array"
-        default:
-            print(JSONBlock.INVALID_START_CHARACTER_ERROR)
-            base.contentType = "string"
-        }
-    }
+//    /// Provide mirror callback to recieve UnsafeRawBufferPointer instance.
+//    public init(_ provider:  ((UnsafeRawBufferPointer?) throws -> UnsafeRawBufferPointer?) throws -> UnsafeRawBufferPointer?) {
+//        guard let buffer = try? provider({$0}) else {
+//            print(JSONBlock.INVALID_BUFFER_INITIALIZATION)
+//            base.contentType = "string"
+//            return
+//        }
+//        base.jsonData = buffer
+//        switch(base.jsonData.first) {
+//        case 123: base.contentType = "object"
+//        case 91: base.contentType = "array"
+//        default:
+//            print(JSONBlock.INVALID_START_CHARACTER_ERROR)
+//            base.contentType = "string"
+//        }
+//    }
+//
+//    /// Provide mirror callback to receive UnsafeRawBufferPointer instance.
+//    public init(_ provider:  ((UnsafeRawBufferPointer?)  -> UnsafeRawBufferPointer?) -> UnsafeRawBufferPointer?) {
+//        guard let buffer = provider({$0}) else {
+//            print(JSONBlock.INVALID_BUFFER_INITIALIZATION)
+//            base.contentType = "string"
+//            return
+//        }
+//        base.jsonData = buffer
+//        switch(base.jsonData.first) {
+//        case 123: base.contentType = "object"
+//        case 91: base.contentType = "array"
+//        default:
+//            print(JSONBlock.INVALID_START_CHARACTER_ERROR)
+//            base.contentType = "string"
+//        }
+//    }
+    
+//    public init(_ data: Data) {
+//        let buffer = data.withUnsafeBytes({$0})
+//        base.jsonData = buffer
+//        switch(base.jsonData.first) {
+//            case 123: base.contentType = "object"
+//            case 91: base.contentType = "array"
+//            default:
+//                print(JSONBlock.INVALID_START_CHARACTER_ERROR)
+//                base.contentType = "string"
+//        }
+//    }
     
     // ======= PRIVATE INITIALIZERS =====
     internal init(_ json: String, _ type: String, _ parent: Base? = nil) {
@@ -152,7 +178,7 @@ public class JSONBlock {
         base.jsonText = json
         base.contentType = type
         if base.contentType == "object" {
-            base.identifyStringDelimter(json)
+            base.identifyStringDelimiter(json)
             base.jsonData = UnsafeRawBufferPointer(start: base.jsonText.withUTF8({$0}).baseAddress, count: base.jsonText.count)
         }
     }
@@ -185,7 +211,7 @@ public class JSONBlock {
 
     /// Temporary make the next query string to be split by the character given. Useful in case of encountering object attribute containing dot notation in their names.
     public func splitQuery(by: Character) -> JSONBlock {
-        base.pathSpliter = by
+        base.pathSplitter = by
         return self
     }
     
@@ -259,7 +285,7 @@ public class JSONBlock {
             if base.errorHandler != nil {
                 base.errorHandler!(ErrorInfo(
                     ErrorCode.nonMatchingDataType,
-                    (path?.split(separator: base.pathSpliter).count ?? 0) - 1,
+                    (path?.split(separator: base.pathSplitter).count ?? 0) - 1,
                     path ?? ""
                 ))
                 base.errorHandler = nil
@@ -298,7 +324,7 @@ public class JSONBlock {
 
     /// write JSON content from scratch recursively. use mapOf and listOf() to write object and array content respectively.
     public static func write(_ jsonData: Any, prettify: Bool = true) -> JSONBlock {
-        let generatedBytes = Base._serializeToBytes(jsonData, 0, prettify ? 4 : 0, 34)
+        let generatedBytes = Base.serializeToBytes(jsonData, 0, prettify ? 4 : 0, 34)
         if generatedBytes.first == 34 {
             return JSONBlock(String(
                 generatedBytes.map({Character(UnicodeScalar($0))})
@@ -318,8 +344,8 @@ public class JSONBlock {
 
     @discardableResult
     /// Update the given given query path.
-    public func replace(_ path: String, _ data: Any) -> JSONBlock {
-        base.errorInfo = base._write(path, data, writeMode: .onlyUpdate)
+    public func replace(_ path: String, _ data: Any?, multiple: Bool = false) -> JSONBlock {
+        base.write(path, data, writeMode: .onlyUpdate, multiple)
         if base.errorInfo != nil {
             base.errorHandler?(ErrorInfo(base.errorInfo!.code, base.errorInfo!.occurredQueryIndex, path))
             base.errorHandler = nil
@@ -329,8 +355,8 @@ public class JSONBlock {
     
     @discardableResult
     /// Insert an element to the given query path. Last segment of the path should address to attribute name / array index to insert on objects / arrays.
-    public func push(_ path: String, _ data: Any) -> JSONBlock {
-        base.errorInfo = base._write(path, data, writeMode: .onlyInsert)
+    public func insert(_ path: String, _ data: Any?, multiple: Bool = false) -> JSONBlock {
+        base.write(path, data, writeMode: .onlyInsert, multiple)
         if base.errorInfo != nil {
             base.errorHandler?(ErrorInfo(base.errorInfo!.code, base.errorInfo!.occurredQueryIndex, path))
             base.errorHandler = nil
@@ -340,8 +366,8 @@ public class JSONBlock {
         
     @discardableResult
     /// Update or insert data to node of the given query path.
-    public func replaceOrPush(_ path: String, _ data: Any) -> JSONBlock {
-        base.errorInfo = base._write(path, data, writeMode: .upsert)
+    public func upsert(_ path: String, _ data: Any?, multiple: Bool = false) -> JSONBlock {
+        base.write(path, data, writeMode: .upsert, multiple)
         if base.errorInfo != nil {
             base.errorHandler?(ErrorInfo(base.errorInfo!.code, base.errorInfo!.occurredQueryIndex, path))
             base.errorHandler = nil
@@ -351,8 +377,8 @@ public class JSONBlock {
     
     @discardableResult
     /// delete path if exists. Return if delete successfully or not.
-    public func delete(_ path: String) -> JSONBlock {
-        base.errorInfo = base._write(path, 0, writeMode: .delete)
+    public func delete(_ path: String, multiple: Bool = false) -> JSONBlock {
+        base.write(path, 0, writeMode: .delete, multiple)
         if base.errorInfo != nil {
             base.errorHandler?(ErrorInfo(base.errorInfo!.code, base.errorInfo!.occurredQueryIndex, path))
             base.errorHandler = nil
@@ -366,16 +392,16 @@ public class JSONBlock {
     }
 
     /// Convert the selected element content to representable `String`.
-    public func stringify(_ path: String) -> String? {
+    public func stringify(_ path: String, tabSize: Int = 3) -> String? {
         guard let result =  base.decodeData(path)
         else { return nil }
         
-        return result.type == "object" || result.type == "array" ? base._prettyifyContent(result.value.memoryHolder.withUnsafeBytes({$0})) : result.value.string
+        return result.type == "object" || result.type == "array" ? base.prettifyContent(result.value.memoryHolder.withUnsafeBytes({$0}), tabSize) : result.value.string
     }
     
     /// Convert the selected element content to representable `String`.
-    public func stringify() -> String {
-        return base.contentType == "object" || base.contentType == "array" ? base._prettyifyContent(base.jsonData) : base.jsonText
+    public func stringify(tabSize: Int = 3) -> String {
+        return base.contentType == "object" || base.contentType == "array" ? base.prettifyContent(base.jsonData, tabSize) : base.jsonText
     }
     
     /// Get the natural value of JSON node. Elements expressed in associated Swift type except
@@ -384,8 +410,8 @@ public class JSONBlock {
     /// parsed recursively until to singular values.
         public func parse() -> Any {
         if base.contentType == "object" || base.contentType == "array" {
-            var iterator = base.jsonData.makeIterator()
-            return base._getStructuredData(&iterator, firstCharacter: iterator.next()!).value.tree
+            var iterator = PeekIterator(base.jsonData)
+            return base.getStructuredData(&iterator, firstCharacter: iterator.next()).value.tree
         }
         return base.resolveValue(base.jsonText, base.jsonDataMemoryHolder, base.contentType)
     }
@@ -427,8 +453,8 @@ public class JSONBlock {
         return element
     }
     
-    /// Get collection all values that matches the given path. Items may have heterogeneous types.
-    public func all(_ path: String) -> [JSONBlock] {
-        return base.decodeData(path, grabAllPaths: true)?.value.array ?? []
+    /// Get collection all values that matches the given path. typeOf parameter to include type constraint else items are not type filtered.
+    public func all(_ path: String, typeOf: JSONType? = nil) -> [JSONBlock] {
+        return base.decodeData(path, grabAllPaths: true, multiCollectionTypeConstraint: typeOf?.rawValue)?.value.array ?? []
     }
 }

@@ -1,12 +1,39 @@
 {
-   "ROOT": {
+   "root": {
       "another": [
          34,
+         {
+            "meta": [
+               [
+                  [
+                     -456,
+                     123,
+                     [
+                        "one",
+                        "two"
+                     ]456
+                  ],
+                  {
+                     "alto": [
+                        -89.34,
+                        "something",
+                        "hello"
+                     ]
+                  }
+               ]
+            ]
+         },
          true,
          {
             "sample": [],
-            "waking": "['good morning nishain', null, -2.34, +45, false]",
+            "waking": "['goodmorningnishain',null,-2.34,+45,false]",
             "meta": {
+               "something": {
+                  "sample": {
+                     "bob": 23
+                  },
+                  "point": null
+               },
                "point": "test"
             },
             "$%#day": 24,
@@ -14,33 +41,37 @@
             "temperature": 56,
             "moredetails": {
                "ahago": "{he\"llo}",
-               "{temperature}": "some world",
+               "{temperature}": "someworld",
                "day\"": 52,
-               "someList": [47],
+               "someList": [
+                  47
+               ],
                "dali": true
             },
             "location": "{'district':'southernprovince','ZamPle-I45d':250,'place':'Galle','meta':{'point':55.23}}"
          }
       ],
       "other": [
-          55,
-          {
-              "location": {
-
-                  "meta": {
-                      "lamo": 45.65,
-                      "point": 32
-                  }
-              },
-              "dat": 57
-          },
-          null
+         55,
+         {
+            "location": {
+               "meta": {
+                  "lamo": 45.65,
+                  "point": 32
+               }
+            },
+            "dat": 57
+         },
+         null
       ],
       "geologicalInformation": {
          "anotherAttribute": {
-             "hello there": "speciesType"
+            "hellothere": "speciesType"
          },
-         "speciesType": ["flower", "naruto"],
+         "speciesType": [
+            "flower",
+            "naruto"
+         ],
          "recipents": "bees",
          "consumers": [
             "king-fisher",
@@ -49,25 +80,27 @@
          ],
          "predator": {
             "mindSummary": {
-               "info": "eager and playful and sometimes very bored and require sleep"
+               "info": "eagerandplayfulandsometimesveryboredandrequiresleep"
             },
-            "anatomy": "big eyes with tail"
+            "anatomy": "bigeyeswithtail"
          }
       },
       "creditaInfo": {
          "futurePlans": [
             [
                {
-                  "geoSpeare": "enwrapped the sun with materials from asteroid to extract energery",
+                  "geoSpeare": "enwrappedthesunwithmaterialsfromasteroidtoextractenergery",
                   "small": "value"
                },
-               "cosmos technology",
+               "cosmostechnology",
                45,
-               {"note": "hello world"}
+               {
+                  "note": "helloworld"
+               }
             ],
             {
                "research": {
-                  "feasibilty": "reverse e=mc2 to convert energy to mass",
+                  "feasibilty": "reversee=mc2toconvertenergytomass",
                   "brand": "OpenMind",
                   "typo": null
                }
@@ -76,15 +109,15 @@
       },
       "refInfo": {
          "condition": "stable-good",
-         "weather": "stable and cloudy",
+         "weather": "stableandcloudy",
          "expectedWeather": "rain",
-         "music": "Deep chills",
-         "music details": {
-            "lyrics": "Its all in the way and say my name",
+         "music": "Deepchills",
+         "musicdetails": {
+            "lyrics": "Itsallinthewayandsaymyname",
             "listenedOn": "24/02/2022",
             "recomendedTags": [
                "chills",
-               "programming music"
+               "programmingmusic"
             ]
          }
       }

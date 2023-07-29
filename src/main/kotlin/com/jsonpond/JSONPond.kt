@@ -1,5 +1,5 @@
 @file:Suppress("unused")
-package JSONPond
+package com.jsonpond
 /** JSONPond constants*/
 enum class Constants {
     /** JSONPond representation of Null*/
@@ -48,17 +48,17 @@ class JSONChild: JSONBlock {
 }
 
 enum class ErrorCode (val rawValue: String) {
-    objectKeyNotFound("cannot find object attribute"),
-    arrayIndexNotFound("cannot find given index within array bounds"),
-    invalidArrayIndex("array index is not a integer number"),
-    objectKeyAlreadyExists("cannot insert because object attribute already exists"),
-    nonMatchingDataType("the data type of value of the value does not match with expected data type that is required from query method"),
-    nonNestableRootType("root data type is neither array or object and cannot transverse"),
-    nonNestedParent("intermediate parent is a leaf node and non-nested. Cannot transverse further"),
-    emptyQueryPath("query path cannot be empty at this query usage"),
-    captureUnknownElement("the path cannot be end with a intermediate representer token"),
-    cannotFindElement("unable to find any element that matches the given path pattern"),
-    other("something went wrong. Target element cannot be found");
+    ObjectKeyNotFound("cannot find object attribute"),
+    ArrayIndexNotFound("cannot find given index within array bounds"),
+    InvalidArrayIndex("array index is not a integer number"),
+    ObjectKeyAlreadyExists("cannot insert because object attribute already exists"),
+    NonMatchingDataType("the data type of value of the value does not match with expected data type that is required from query method"),
+    NonNestableRootType("root data type is neither array or object and cannot transverse"),
+    NonNestedParent("intermediate parent is a leaf node and non-nested. Cannot transverse further"),
+    EmptyQueryPath("query path cannot be empty at this query usage"),
+    CaptureUnknownElement("the path cannot be end with a intermediate represented token"),
+    CannotFindElement("unable to find any element that matches the given path pattern"),
+    Other("something went wrong. Target element cannot be found");
 
     companion object {
         operator fun invoke(rawValue: String) = values().firstOrNull { it.rawValue == rawValue }
@@ -80,7 +80,7 @@ open class JSONBlock {
             write JSON content from scratch recursively. use mapOf and listOf() to write object and array content respectively.
          */
         fun write(jsonData: Any, prettify: Boolean = true) : JSONBlock {
-            val generatedBytes = Base._serializeToBytes(jsonData, 0, if (prettify) 4 else 0, 34)
+            val generatedBytes = Base.serializeToBytes(jsonData, 0, if (prettify) 4 else 0, 34)
             if (generatedBytes[0] == 34.toByte()) {
                 return JSONBlock(generatedBytes, "string")
             }
@@ -115,8 +115,8 @@ open class JSONBlock {
     constructor(jsonBufferPointer: ByteArray) {
         base.jsonData = jsonBufferPointer
         base.contentType = when ((base.jsonData.firstOrNull())) {
-            State.OPEN_OBJECT -> "object"
-            State.OPEN_ARRAY -> "array"
+            123.toByte() -> "object"
+            91.toByte() -> "array"
             else -> {
                 println(INVALID_START_CHARACTER_ERROR)
                 "string"
@@ -203,7 +203,7 @@ open class JSONBlock {
                 return JSONBlock(base.jsonText, "object", this.base)
             }
             if(base.errorHandler != null) {
-                base.errorHandler?.invoke(ErrorInfo(ErrorCode.nonMatchingDataType, -1, ""))
+                base.errorHandler?.invoke(ErrorInfo(ErrorCode.NonMatchingDataType, -1, ""))
             }
             return null
         }
@@ -233,7 +233,7 @@ open class JSONBlock {
         if(data.type != "CODE_COLLECTION") {
             if(base.errorHandler != null) {
                 base.errorHandler?.invoke(
-                    ErrorInfo(ErrorCode.nonMatchingDataType,
+                    ErrorInfo(ErrorCode.NonMatchingDataType,
                         (path?.split(base.pathSplitter)?.size ?: 0) -1,
                         path ?: ""
                     )
@@ -271,12 +271,13 @@ open class JSONBlock {
     }
 
     /**
-        Get collection all values that matches the given path. Items may have heterogeneous types.
+        Get collection all values that matches the given path. typeOf parameter to include type constraint else items are not type filtered.
     */
-    fun all(path: String): Array<JSONBlock> {
+    fun all(path: String, typeOf: JSONType? = null): Array<JSONBlock> {
         return base.decodeData(
             path,
-            grabAllPaths =  true
+            grabAllPaths =  true,
+            multiCollectionTypeConstraint = typeOf
         )?.value?.array ?: arrayOf()
     }
 
@@ -294,8 +295,8 @@ open class JSONBlock {
     }
 
     /** Update the given given query path.*/
-    fun replace(path: String, data: Any) : JSONBlock {
-        base.errorInfo = base._write(path, data, writeMode = UpdateMode.onlyUpdate)
+        fun replace(path: String, data: Any, multiple: Boolean = false) : JSONBlock {
+        base.write(path, data, UpdateMode.OnlyUpdate, multiple)
         base.errorInfo?.apply {
             base.errorHandler?.invoke(ErrorInfo(this.first, this.second, path))
             base.errorHandler = null
@@ -305,8 +306,8 @@ open class JSONBlock {
 
     /** Insert an element to the given query path. Last segment of the path should address to attribute name / array index to insert on objects / arrays.
      */
-    fun push(path: String, data: Any) : JSONBlock {
-        base.errorInfo = base._write(path, data, writeMode = UpdateMode.onlyInsert)
+    fun insert(path: String, data: Any, multiple: Boolean = false) : JSONBlock {
+        base.write(path, data, UpdateMode.OnlyInsert, multiple)
         base.errorInfo?.apply {
             base.errorHandler?.invoke(ErrorInfo(this.first, this.second, path))
             base.errorHandler = null
@@ -315,8 +316,8 @@ open class JSONBlock {
     }
 
     /** Update or insert data to node of the given query path.*/
-    fun replaceOrPush(path: String, data: Any) : JSONBlock {
-        base.errorInfo = base._write(path, data, writeMode = UpdateMode.upsert)
+    fun upsert(path: String, data: Any, multiple: Boolean = false) : JSONBlock {
+        base.write(path, data, UpdateMode.Upsert, multiple)
         base.errorInfo?.apply {
             base.errorHandler?.invoke(ErrorInfo(this.first, this.second, path))
             base.errorHandler = null
@@ -325,8 +326,8 @@ open class JSONBlock {
     }
 
     /** delete path if exists. Return if delete successfully or not.*/
-    fun delete(path: String) : JSONBlock {
-        base.errorInfo = base._write(path, 0, writeMode = UpdateMode.delete)
+    fun delete(path: String, multiple: Boolean = false) : JSONBlock {
+        base.write(path, 0, UpdateMode.Delete, multiple)
         base.errorInfo?.apply {
             base.errorHandler?.invoke(ErrorInfo(this.first, this.second, path))
             base.errorHandler = null
@@ -347,17 +348,17 @@ open class JSONBlock {
 
 
     /** Convert the selected element content to representable [String].*/
-    fun stringify(path: String) : String? {
+    fun stringify(path: String, tabSize: Int = 3) : String? {
         val result = base.decodeData(path)
         if (result != null) {
-            return if (result.type == "object" || result.type == "array") base._prettyifyContent(result.value.bytes) else result.value.string
+            return if (result.type == "object" || result.type == "array") base.prettifyContent(result.value.bytes, tabSize) else result.value.string
         }
         return null
     }
 
     /** Convert the selected element content to representable [String]. */
-    fun stringify() : String =
-        if (base.contentType == "object" || base.contentType == "array") base._prettyifyContent(base.jsonData) else base.jsonText
+    fun stringify(tabSize: Int = 3) : String =
+        if (base.contentType == "object" || base.contentType == "array") base.prettifyContent(base.jsonData, tabSize) else base.jsonText
 
     /**
      Get the natural value of JSON node. Elements expressed in associated Kotlin type except
@@ -367,8 +368,8 @@ open class JSONBlock {
      */
     fun parse() : Any {
         if (base.contentType == "object" || base.contentType == "array") {
-            val iterator = base.jsonData.iterator()
-            return base._getStructuredData(iterator, firstCharacter = iterator.nextByte()).value.tree
+            val iterator = PeekIterator(base.jsonData)
+            return base.getStructuredData(iterator, firstCharacter = iterator.nextByte()).value.tree
         }
         return base.resolveValue(base.jsonText, base.jsonData, base.contentType)
     }

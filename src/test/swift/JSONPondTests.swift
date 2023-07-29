@@ -29,15 +29,15 @@ final class JSONPondTest: XCTestCase {
         do {
             let jsonData = try Data(contentsOf: URL(fileURLWithPath: path!))
             let start = Date()
-            let pond = JSONBlock(jsonData.withUnsafeBytes)
-            pond.onQueryFail(<#T##handler: (ErrorInfo) -> Void##(ErrorInfo) -> Void#>)
+            
+            let pond = JSONBlock(jsonData)
             let result = pond
                 .onQueryFail({
                     print($0.explain())
                 })
-                .collection("..root.another")?.map({$0.string("bakerville")})
             
-            print(result ?? "nothing")
+                .delete("???.location.meta").stringify()
+            print(result)
             print("elapsed time - ", Date().timeIntervalSince(start))
         } catch {
             print(error)

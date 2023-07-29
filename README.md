@@ -1,13 +1,16 @@
-# JSONPond (v2.8) :rocket:
+# JSONPond (v2.9) :rocket:
 ![](https://img.shields.io/badge/Support-Swift-f16430)
 ![](https://img.shields.io/badge/install-Swift_Package_Manager-f16430)
 ![](https://img.shields.io/badge/Support-Kotlin-6b6dd7)
 ![](https://img.shields.io/badge/install-Maven_Central-6b6dd7)
 
-
 Handling JSON in a type-constrained language ecosystem is a bit tough right? One way of parsing JSON is to parse JSON string to a known object model but you have to know the structure of `JSON` beforehand for this. Also, you may need to chain a lot of calls before being made into the final value plus you might have to check the existence of values and data types of those values when handling any complex read queries. Also, there are times you really need JSON structure to be dynamic in a certain scenario and would be messy to apply safe conditionals all over the code base. Maintaining consistency between the backend response structure and expected reading format is required for all of this perhaps now you need a clean and simpler solution to respond adaptively to different `JSON` outputs.
 
 JSONPond helps you to parse JSON in any free form and extract value without constraining it into a fixed type. This is a pure zero dependency `Swift + Kotlin` library with the technique of `Read Only Need Content` in a single read cycle and which means no byte is read twice! and perfect O(1) time complexity which is why this library is really fast.
+
+## Anouncement :mega:
+
+Since JSONPond has reached certain level of complexity I am planning to make tutorial on upcomming schedule so stay tuned!
 
 ## Installation
 
@@ -20,7 +23,7 @@ Gradle script
 
 ```groovy
 dependencies    {
-    implmementation("io.github.nishain-de-silva:jsonpond:2.8.0")
+    implmementation("io.github.nishain-de-silva:jsonpond:2.9.0")
 }
 
 ```
@@ -31,9 +34,9 @@ dependencies    {
 > The library does `not` handle or validate incorrect `JSON` format in preference for performance. Please make sure to handle and validate JSON in such cases or otherwise would give you incorrect or unexpected any(s). JSON content must be decodable in `UTF` format (Best tested in `UTF-8` format).
 ## Initializing
 
-There are a handful of ways to initialize JSONPond. You can initialize by `string` or from the `Data` and `ByteArray` in Swift and Kotlin respectively. In Swift, initializing from `Data` is a bit trickier as JSONPond does not use `Foundation` so it cannot resolve the `Data` type. Hence you have to provide the `UnsafeRawBufferPointer` instance instead. You can also provide a function that requires map callback (eg: `Data.withUnsafeBytes` as constructor parameter _(see [withUnsafeBytes](https://developer.apple.com/documentation/swift/array/withunsafebytes(_:)) to learn about such callbacks)_.
+There are a handful of ways to initialize JSONPond. You can initialize by `string` or from the `Data` and `ByteArray` in Swift and Kotlin respectively, in swift you can directly initilize from `UnsafeRawBufferPointer` as well. 
 
-> When initializing from String inner string attributes can be quoted by either single or escaped double quotation you don't have to worry about that!
+> When initializing from `String` inner nested string attributes can be quoted by either single or escaped double quotation and JSONPond automatically detect the string delimiter so you don't have to worry about that!
 
 In Swift,
 ```swift
@@ -209,11 +212,16 @@ You can also use multiple `intermediate representer` tokens like this,
 let path = "root.???.info.???.name"
 ```
 
-In this way, you will get the **first occurrence** value that satisfies the given dynamic path. If you want to collect all attributes that satifies the path then use `all(:path)`.
+In this way, you will get the **first occurrence** value that satisfies the given dynamic path. If you want to collect all attributes that satifies the path then use `all(:path)`. By default `all(:path, :typeOf)` captures all matching element else you can specify the type is second parameter.
+
+### Restricting depth search
+
+You also explicitly defined the depth limit by annotating `???` to `???{x}` where x is the number of levels of distance between presendent and decendant element. By default it has no limit so it would target at any depth level. For example if you want to target an unknown attribute but you know it is an element under 2 levels then you may use `???{2}` to target it.
 
 Few rules,
 >- Do not use multiple consecutive tokens in a single combo like `root.???.???.value`. Use a single token instead.
 >- You cannot end a path with an intermediate token (it makes sense right, you should at least know what you are searching for at the end).
+>- Mind that when specifying depth that `???{0}` is invalid and will be treated as `???{1}`. Make sure to include no spaces.
 
 
 ## Handling unknown types
@@ -249,11 +257,13 @@ Sometimes you may need to write the results on a `serializable` destination such
 _Remember `null` is represented by `JSONPond.Constants.NULL`. This is to avoid optional wrapping._
 
 # Writing Data
-JSONPond now supports the entire CRUD functionality. For write operations, there are 4 functions.
+JSONPond now supports the entire CRUD functionality. For write operations, there are 4 functions. Write functions also supports intermediate `???` tags.
 - `delete()`
 - `replace()`
 - `push()`
 - `replaceOrPush()`
+
+Each write method has optional parameter `:multiple` by default `false` to indicate to perform CRUD operations on multiple matching occurences generally if you use intermediate `???` tokens.
 
 To write JSON from scratch use the static method `JSONBlock.write()` method,
 
@@ -308,9 +318,6 @@ entity.push(keyPath, sampleData)
 let arrayPath = "pathA.PathB.targetArray"
 entity.push(arrayPath, sampleData)
 ```
-
-> **Warning**
-> Write query functions do not support intermediate `???` tags. You should be aware of the absolute path you want to write or delete.
 
 ## Update and replaceOrPush
 

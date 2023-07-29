@@ -1,4 +1,4 @@
-package JSONPond
+package com.jsonpond
 
 internal open class State {
     companion object {
@@ -28,7 +28,5 @@ internal open class State {
     internal var pathSplitter: Char = '.'
     internal var isBubbling: Boolean = false
 
-    protected var QUOTATION: Byte = 34
-
-
+    protected var quotation: Byte = 34
 }

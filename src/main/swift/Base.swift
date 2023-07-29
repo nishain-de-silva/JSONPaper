@@ -1,6 +1,6 @@
 //
 //  File.swift
-//  
+//
 //
 //  Created by Nishain De Silva on 2023-06-11.
 //
@@ -12,6 +12,7 @@ internal class Base: State {
         case onlyInsert
         case delete
     }
+    
     internal class ValueStore {
         var string: String = ""
         var memoryHolder: [UInt8] = []
@@ -19,6 +20,7 @@ internal class Base: State {
         var array: [JSONBlock] = []
         var children: [JSONChild] = []
         var tree: Any = []
+        var isBytes: Bool = false
         
         init(_ input: String) {
             string = input
@@ -26,11 +28,13 @@ internal class Base: State {
         
         init(_ data: [UInt8]) {
             memoryHolder = data
+            isBytes = true
         }
         
         init(_ text: String, _ data: [UInt8]) {
             string = text
             memoryHolder = data
+            isBytes = !memoryHolder.isEmpty
         }
         
         init(arrayData: [JSONBlock]) {
@@ -68,7 +72,7 @@ internal class Base: State {
 
     }
     
-    internal static func _serializeToBytes(_ node: Any?, _ index: Int, _ tabCount: Int, _ stringDelimiter: UInt8) -> [UInt8]  {
+    internal static func serializeToBytes(_ node: Any?, _ index: Int, _ tabCount: Int, _ stringDelimiter: UInt8) -> [UInt8]  {
         if let node {
             guard let object = node as? [String: Any?] else {
                 guard let array = node as? [Any?] else {
@@ -86,14 +90,14 @@ internal class Base: State {
                     }
                     return [stringDelimiter] + Array(string.utf8) + [stringDelimiter]
                 }
-                let innerContent = array.map({_serializeToBytes($0, index + 1, tabCount, stringDelimiter)})
+                let innerContent = array.map({serializeToBytes($0, index + 1, tabCount, stringDelimiter)})
                 if tabCount != 0 && innerContent.count != 0 {
                     let spacer: [UInt8] = Array(repeating: 32, count: (index + 1) * tabCount)
                     let endSpacer: [UInt8] = Array(repeating: 32, count: index * tabCount)
                     var data: [UInt8] = [91, 10]
-                    let seperator: [UInt8] = [44, 10] + spacer
+                    let separator: [UInt8] = [44, 10] + spacer
                     data.append(contentsOf: spacer)
-                    data.append(contentsOf: innerContent.joined(separator: seperator))
+                    data.append(contentsOf: innerContent.joined(separator: separator))
                     data.append(10)
                     data.append(contentsOf: endSpacer)
                     data.append(93)
@@ -102,15 +106,15 @@ internal class Base: State {
                 return ([91] + innerContent.joined(separator: [44])) + [93]
             }
             let innerContent = object.map({(key, value) in
-                (([stringDelimiter] + Array(key.utf8)) + (tabCount != 0 ? [stringDelimiter, 58, 32] : [stringDelimiter, 58])) + _serializeToBytes(value,index + 1 , tabCount, stringDelimiter)
+                (([stringDelimiter] + Array(key.utf8)) + (tabCount != 0 ? [stringDelimiter, 58, 32] : [stringDelimiter, 58])) + serializeToBytes(value,index + 1 , tabCount, stringDelimiter)
             })
             if tabCount != 0 && innerContent.count != 0 {
                 let spacer: [UInt8] = Array(repeating: 32, count: (index + 1) * tabCount)
                 let endSpacer: [UInt8] = Array(repeating: 32, count: index * tabCount)
                 var data: [UInt8] = [123, 10]
-                let seperator: [UInt8] = [44, 10] + spacer
+                let separator: [UInt8] = [44, 10] + spacer
                 data.append(contentsOf: spacer)
-                data.append(contentsOf: innerContent.joined(separator: seperator))
+                data.append(contentsOf: innerContent.joined(separator: separator))
                 data.append(10)
                 data.append(contentsOf: endSpacer)
                 data.append(125)
@@ -123,50 +127,79 @@ internal class Base: State {
     }
     
     
-    private func _continueCopyData(_ iterator: inout UnsafeRawBufferPointer.Iterator, _ data: inout [UInt8], _ dataToAdd: [UInt8], dataType: Int) {
-        var shoudRecoverComma = false
+    private func replaceData(_ iterator: inout PeekIterator, _ dataToAdd: [UInt8], copiedBytes: inout [UInt8]) {
+        
+        let quotation = quotation
         // 0 - object/array, string - 1, others - 3
-        if dataType == 0 {
-            var notationBalance = 1
-            while true {
-                guard let char = iterator.next() else { break }
-                if char == 123 || char == 91 {
-                    notationBalance += 1
-                } else if char == 125 || char == 93 {
-                    notationBalance -= 1
-                }
-                if notationBalance == 0 {
-                    break
-                }
+        var notationBalance = 0
+        var type = -1
+        var isInQuotes = false
+        var isEscaping = false
+        
+        while iterator.hasNext() {
+            let char = iterator.next()
+            if char == 123 || char == 91 {
+                type = 1
+                notationBalance = 1
+                break
             }
-        } else if dataType == 1 {
-            while true {
-                guard let char = iterator.next() else { break }
-                if char == QUOTATION {
-                    break
-                }
+            if char == quotation {
+                type = 2
+                isInQuotes = true
+                break
             }
-        } else if dataType == 3 {
-            while true {
-                guard let char = iterator.next() else { break }
-                if char == 44 {
-                    shoudRecoverComma = true
-                    break
-                } else if char == 125 || char == 93 {
-                    break
+            if (char > 47 && char < 58) || char == 45 || (char > 96 && char < 123) {
+                type = 3
+                break
+            }
+            copiedBytes.append(char)
+        }
+        
+        if type == 1 || type == 2 {
+            while iterator.hasNext() {
+                let char = iterator.next()
+                if isInQuotes {
+                    if !isEscaping && char == quotation {
+                        if type == 2 {
+                            copiedBytes.append(contentsOf: dataToAdd)
+                            return
+                        }
+                        isInQuotes = false
+                        
+                    } else if isEscaping {
+                        isEscaping = false
+                    } else if char == 92 {
+                        isEscaping = true
+                    }
+                } else {
+                    if char == 123 || char == 91 {
+                        notationBalance += 1
+                    } else if char == 125 || char == 93 {
+                        notationBalance -= 1
+                        if notationBalance == 0 {
+                            copiedBytes.append(contentsOf: dataToAdd)
+                            return
+                        }
+                    } else if char == quotation {
+                        isInQuotes = true
+                    }
+                }
+                
+            }
+        } else if type == 3 {
+            while iterator.hasNext() {
+                let char = iterator.next()
+                if !(isNumber(char) || (char > 96 && char < 123)) {
+                    copiedBytes.append(contentsOf: dataToAdd)
+                    iterator.moveBack()
+                    return
                 }
             }
         }
-        data += dataToAdd
-        if shoudRecoverComma {
-            data.append(44)
-        }
-        while true {
-            guard let char = iterator.next() else { break }
-            data.append(char)
-        }
-        jsonDataMemoryHolder = data
-        jsonData = jsonDataMemoryHolder.withUnsafeBytes({$0})
+    }
+    
+    internal func isNumber(_ char: UInt8) -> Bool {
+        return (char > 47 && char < 58) || char == 46 || char == 45
     }
     
     internal func getField <T>(_ path: String?, _ fieldName: String, _ mapper: (ValueStore) -> T?, ignoreType:Bool = false) -> T? {
@@ -175,7 +208,7 @@ internal class Base: State {
             if errorHandler != nil {
                 errorHandler!(ErrorInfo(
                     ErrorCode.nonMatchingDataType,
-                    (path?.split(separator: pathSpliter).count ?? 0) - 1,
+                    (path?.split(separator: pathSplitter).count ?? 0) - 1,
                     path ?? ""
                 ))
                 errorHandler = nil
@@ -195,55 +228,56 @@ internal class Base: State {
         }
     }
     
-    private func _addData(_ isInObject: Bool, _ dataToAdd: Any, _ iterator: inout UnsafeRawBufferPointer.Iterator, _ copiedBytes: inout [UInt8], _ tabUnitCount: Int, paths: [[UInt8]], isIntermediateAdd: Bool = false) -> (ErrorCode, Int)? {
-        if !isIntermediateAdd && !_isLastCharacterOpenNode(&copiedBytes) {
-            copiedBytes.append(44)
+    @discardableResult
+    private func addData(_ notationBalance: Int, _ isInObject: Bool, _ dataToAdd: Any?, _ copiedBytes: inout [UInt8], _ tabUnitCount: Int, paths: [[UInt8]], isIntermediateAdd: Bool = false, isFirstValue: Bool = false) -> (ErrorCode, Int)? {
+        
+        let quotation = quotation
+        if !isIntermediateAdd {
+            copiedBytes.removeLast()
+            if !isLastCharacterOpenNode(&copiedBytes) {
+                copiedBytes.append(44)
+            }
         }
-        if tabUnitCount != 0 {
+        if tabUnitCount != 0 && !isFirstValue {
             copiedBytes.append(10)
-            copiedBytes.append(contentsOf: [UInt8] (repeating: 32, count: (paths.count) * tabUnitCount))
+            copiedBytes.append(contentsOf: [UInt8] (repeating: 32, count: notationBalance * tabUnitCount))
         }
         if isInObject {
-            copiedBytes.append(QUOTATION)
+            copiedBytes.append(quotation)
             copiedBytes.append(contentsOf: paths[paths.count - 1])
-            let endKeyPhrase: [UInt8] = tabUnitCount == 0 ? [QUOTATION, 58] : [QUOTATION, 58, 32]
+            let endKeyPhrase: [UInt8] = tabUnitCount == 0 ? [quotation, 58] : [quotation, 58, 32]
             copiedBytes.append(contentsOf: endKeyPhrase)
         }
         
-        var bytesToAdd = Base._serializeToBytes(dataToAdd, paths.count, tabUnitCount, QUOTATION)
+        var bytesToAdd = Base.serializeToBytes(dataToAdd, notationBalance, tabUnitCount, quotation)
         
         if !isIntermediateAdd {
             if tabUnitCount != 0 {
                 bytesToAdd.append(10)
-                bytesToAdd.append(contentsOf: [UInt8] (repeating: 32, count: (paths.count - 1) * tabUnitCount))
+                bytesToAdd.append(contentsOf: [UInt8] (repeating: 32, count: (notationBalance - 1) * tabUnitCount))
             }
             bytesToAdd.append(isInObject ? 125 : 93)
         } else {
-            var trialBytes: [UInt8] = []
-            // this was due to rare case when pushing to an empty array when push index is 0
-            while true {
-                guard let char = iterator.next() else { break }
-                trialBytes.append(char)
-                if char != 32 && char != 10 {
-                    if char != 93 {
-                        bytesToAdd.append(44)
-                    } else if tabUnitCount != 0 {
-                        bytesToAdd.append(10)
-                        bytesToAdd.append(contentsOf: [UInt8] (repeating: 32, count: (paths.count - 1) * tabUnitCount))
-                    }
-                    break
-                }
+            bytesToAdd.append(44)
+            if tabUnitCount != 0 && isFirstValue {
+                bytesToAdd.append(10)
+                bytesToAdd.append(contentsOf: [UInt8] (repeating: 32, count: notationBalance * tabUnitCount))
             }
-            bytesToAdd.append(contentsOf: trialBytes)
         }
-        _continueCopyData(&iterator, &copiedBytes, bytesToAdd, dataType: 4)
+        copiedBytes.append(contentsOf: bytesToAdd)
         return nil
     }
     
-    internal func _write(_ path: String, _ data: Any, writeMode: UpdateMode) -> (ErrorCode, Int)? {
-        if contentType != "object" && contentType != "array" {
-            return (ErrorCode.nonNestableRootType, 0)
+    internal func write(_ inputPath: String,
+            _ data:Any?, writeMode: UpdateMode,
+            _ isMultiple: Bool
+        ) {
+        errorInfo = nil
+        if !(contentType == "object" || contentType == "array") {
+            errorInfo = (ErrorCode.nonNestableRootType, 0)
+            return
         }
+        
         var tabUnitCount = 0
         if jsonData[1] == 10 {
             while (tabUnitCount + 2) < jsonData.count {
@@ -252,139 +286,306 @@ internal class Base: State {
                 } else { break }
             }
         }
-        var isQuotes = false
-        var isGrabbingKey = false
-        var grabbedKey: [UInt8] = []
-        var isEscaping = false
-        var notationBalance = 0
-        var processedindex = 0
-        let paths:[[UInt8]] = _splitPath(path).paths
+        
+        let (paths, lightMatch, arrayIndexes, searchDepths) = splitPath(inputPath)
+        var processedPathIndex = 0
+        var advancedOffset = 0
+        var traversalHistory: [(processedPathIndex: Int, advancedOffset: Int)] = []
+
+        var isInQuotes = false
+        var startSearchValue = false
+        var grabbingKey:[UInt8] = []
         var copiedBytes: [UInt8] = []
-        var searchValue = 0
-        var iterator = jsonData.makeIterator()
+        var needProcessKey = false
+        var isGrabbingKey = false
+        var isObjectAttributeFound = false
+    
+        var notationBalance = 0
+        var searchDepth = 1
+        var escapeCharacter: Bool = false
+
+        @discardableResult
+        func restoreLastPointIfNeeded(_ shouldRestore: Bool = true) -> Bool {
+            if shouldRestore && traversalHistory.count > 0 {
+                (processedPathIndex, advancedOffset) =  traversalHistory[traversalHistory.count - 1]
+                searchDepth = searchDepths[processedPathIndex]
+                startSearchValue = false
+                return true
+            }
+            return false
+        }
+        
+        func addToTraversalHistoryIfNeeded() {
+            if searchDepths[processedPathIndex] == 0 {
+                traversalHistory.append((processedPathIndex, advancedOffset))
+            }
+            searchDepth = searchDepths[processedPathIndex]
+        }
+        
+        func isAttributeKeyMatch(_ lightMatch: Int, _ capturedKey: [UInt8], _ keyToMatch: [UInt8]) -> Bool {
+            if lightMatch < 3 {
+                return capturedKey == keyToMatch
+            }
+            var searchIndex = 0
+            for char in capturedKey {
+                if char == keyToMatch[searchIndex] {
+                    searchIndex += 1
+                    if searchIndex == keyToMatch.count {
+                        return true
+                    }
+                }
+            }
+            return false
+        }
+        
+        func finishWriting() {
+            while iterator.hasNext() {
+                let char = iterator.next()
+                copiedBytes.append(char)
+            }
+            
+            jsonDataMemoryHolder = copiedBytes
+            jsonData = jsonDataMemoryHolder.withUnsafeBytes({$0})
+        }
+        
         
         if paths.count == 0 {
-            return (ErrorCode.emptyQueryPath, -1)
+            errorInfo = (ErrorCode.emptyQueryPath, -1)
+            return
         }
-        while true {
-            guard let char = iterator.next() else { break }
-            if !isQuotes {
+        
+        if paths.last == intermediateSymbol {
+            errorInfo = (ErrorCode.captureUnknownElement, paths.count - 1)
+            return
+        }
+        
+        let quotation = quotation
+        
+        var iterator = PeekIterator(jsonData)
+        
+        addToTraversalHistoryIfNeeded()
+        
+        while iterator.hasNext() {
+            let char = iterator.next()
+            copiedBytes.append(char)
+            // if within quotation ignore processing json literals...
+            if !isInQuotes {
                 if char == 123 || char == 91 {
                     notationBalance += 1
-                    if searchValue == 1 {
-                        if writeMode == .onlyInsert {
-                            return (ErrorCode.objectKeyAlreadyExists, processedindex - 1)
+                    
+                    // initiate elements counting inside array on reaching open bracket...
+                    if char == 91 && (searchDepth == 0 || (advancedOffset + searchDepth) == notationBalance) {
+                        let parsedIndex = arrayIndexes[processedPathIndex]
+                        // occur when trying to access element of array with non-number index
+                        if parsedIndex == nil {
+                            if restoreLastPointIfNeeded() {
+                                continue
+                            }
+                            errorInfo = (ErrorCode.invalidArrayIndex, processedPathIndex)
+                            return
                         }
-                        let bytesToAdd = Base._serializeToBytes(data, paths.count, tabUnitCount, QUOTATION)
-                        _continueCopyData(&iterator, &copiedBytes, bytesToAdd, dataType: 0)
-                        return nil
-                    } else if char == 91 && (processedindex + 1) == notationBalance {
-                        guard let parsedInt = _toNumber(paths[processedindex]) else {
-                            return (ErrorCode.invalidArrayIndex, processedindex)
-                        }
-                        searchValue = 0
-                        if _iterateArrayWrite(&iterator, elementIndex: parsedInt, &copiedBytes) {
-                            processedindex += 1
-                            if processedindex == paths.count {
-                                searchValue = 1
-                                if writeMode == .delete {
-                                    _deleteData(&iterator, &copiedBytes, tabUnitCount,notationBalance ,paths.count)
-                                    return nil
-                                } else if writeMode == .onlyInsert {
-                                    return _addData(false, data, &iterator, &copiedBytes, tabUnitCount, paths: paths, isIntermediateAdd: true)
+                        
+                        if (processedPathIndex + 1) == paths.count {
+                            if iterateArrayWriteRecursive(&iterator, elementIndex: parsedIndex!, &copiedBytes, notationBalance, searchDepth == 0, data, writeMode, isMultiple, tabUnitCount) {
+                                if !restoreLastPointIfNeeded(isMultiple) {
+                                    finishWriting()
+                                    return
                                 }
-                            } else {
-                                searchValue = 2
                             }
-                        } else if processedindex < (paths.count - 1) {
-                            return (ErrorCode.arrayIndexNotFound, processedindex)
-                        } else if processedindex == (paths.count - 1) {
-                            if writeMode == .upsert || writeMode == .onlyInsert {
-                                return _addData(false, data, &iterator, &copiedBytes, tabUnitCount, paths: paths)
-                            } else {
-                                return (ErrorCode.arrayIndexNotFound, processedindex)
+                        } else {
+                            if iterateArrayWrite(&iterator, elementIndex: parsedIndex!, &copiedBytes) {
+                                processedPathIndex += 1
+                                advancedOffset += searchDepth
+                                if searchDepth == 0 {
+                                    advancedOffset = notationBalance
+                                }
+                                startSearchValue = true
+                                addToTraversalHistoryIfNeeded()
                             }
                         }
-                        continue
+                    } else {
+                        // move to next nest object and start looking attribute key on next nested object...
+                        startSearchValue = false
                     }
-                    else if searchValue != 0 {
-                        searchValue = 0
-                    }
-                } else if char == 125 || char == 93 {
+                    continue
+                }
+                
+                if char == 125 || char == 93 {
                     notationBalance -= 1
-                    if processedindex >= notationBalance {
-                        if notationBalance + 1 == paths.count && (writeMode == .upsert || writeMode == .onlyInsert) {
-                            return _addData(char == 125, data, &iterator, &copiedBytes, tabUnitCount, paths: paths)
-                        }
-                        return (char == 125 ? ErrorCode.objectKeyNotFound : ErrorCode.arrayIndexNotFound, notationBalance)
-                    }
-                } else if char == 58 && (processedindex + 1) == notationBalance {
-                    if paths[processedindex] == grabbedKey {
-                        processedindex += 1
-                        searchValue = 2
-                        if processedindex == paths.count {
-                            searchValue = 1
-                            if writeMode == .delete {
-                                _deleteData(&iterator, &copiedBytes, tabUnitCount,notationBalance ,paths.count)
-                                return nil
+                    // section responsible for adding attribute at the end of the object if the attribute is not found
+                    if (searchDepth == 0 || notationBalance == advancedOffset) && char == 125 && (processedPathIndex + 1) == paths.count && (writeMode == .upsert || writeMode == .onlyInsert) {
+                        if isObjectAttributeFound {
+                            isObjectAttributeFound = false
+                        } else {
+                            // make sure the the last attribute is an object attribute and not an array index
+                            if arrayIndexes[arrayIndexes.count - 1] == nil {
+                                addData(notationBalance + 1, true, data, &copiedBytes, tabUnitCount, paths: paths)
+                                if !restoreLastPointIfNeeded(isMultiple) {
+                                    finishWriting()
+                                    return
+                                }
+                            } else if !restoreLastPointIfNeeded() {
+                                errorInfo = (ErrorCode.objectKeyNotFound, paths.count - 1)
+                                return
                             }
                         }
                     }
-                } else if searchValue > 0 && ((char >= 48 && char <= 57) || char == 45
-                || char == 116 || char == 102
-                || char == 110) {
-                    if searchValue == 2 {
-                        return (ErrorCode.nonNestedParent, processedindex - 1)
+                    
+                    // occur after all element in focused array or object is finished searching...
+                    if notationBalance == advancedOffset {
+                        if traversalHistory.count != 0 {
+                            if traversalHistory.last!.advancedOffset == advancedOffset {
+                                let lastIndex = traversalHistory.removeLast().processedPathIndex
+                                
+                                if traversalHistory.count == 0 {
+                                    if isMultiple {
+                                        finishWriting()
+                                        return
+                                    }
+                                    errorInfo = (ErrorCode.cannotFindElement, lastIndex)
+                                    return
+                                }
+                            }
+                            (processedPathIndex, advancedOffset) = traversalHistory.last!
+                            searchDepth = searchDepths[processedPathIndex]
+                            startSearchValue = false
+                            continue
+                        }
+                        // checking wether if currently the processing index is attribute or array index
+                        errorInfo = (arrayIndexes[processedPathIndex] == nil ? ErrorCode.objectKeyNotFound : ErrorCode.arrayIndexNotFound, notationBalance)
+                        return
                     }
-                    if writeMode == .onlyInsert {
-                        return (ErrorCode.objectKeyAlreadyExists, processedindex - 1)
-                    }
-                    let bytesToAdd = Base._serializeToBytes(data, paths.count, tabUnitCount, QUOTATION)
-                    _continueCopyData(&iterator, &copiedBytes, bytesToAdd, dataType: 3)
-                    return nil
+                    continue
                 }
             }
-            if !isEscaping && char == QUOTATION {
-                isQuotes = !isQuotes
-                if searchValue > 0 {
-                    if searchValue == 2 {
-                        return (ErrorCode.nonNestedParent, processedindex - 1)
+            
+            // ======== FINISHED HANDING JSON OPEN AND CLOSE NOTATION ==========
+            if startSearchValue {
+                if notationBalance == advancedOffset {
+                    // ====== HANDLING GRABBING STRINGS =========
+                    // ignore escaped double quotation characters inside string values...
+                    if !escapeCharacter && char == quotation {
+                        isInQuotes = !isInQuotes
+                        // if not the last processed value skip capturing value
+                        if processedPathIndex != paths.count {
+                            if restoreLastPointIfNeeded() {
+                                continue
+                            }
+                            errorInfo = (ErrorCode.nonNestedParent, processedPathIndex - 1)
+                            return
+                        }
+                        // used to copy values true, false, null and number
+                    } else {
+                        // ========== HANDLING GRABBING NUMBERS, BOOLEANS AND NULL
+                        if !isInQuotes && ((char >= 48 && char <= 57) || char == 45
+                                || char == 116 || char == 102
+                                || char == 110
+                        ) {
+                            if processedPathIndex != paths.count {
+                                if restoreLastPointIfNeeded() {
+                                    continue
+                                }
+                                errorInfo = (ErrorCode.nonNestedParent, processedPathIndex - 1)
+                                return
+                            }
+                        }
                     }
-                    if writeMode == .onlyInsert {
-                        return (ErrorCode.objectKeyAlreadyExists, processedindex - 1)
+                } else if char == quotation && !escapeCharacter {
+                    isInQuotes = !isInQuotes
+                }
+                
+                // ========= SECTION RESPONSIBLE HANDLING OBJECT KEY
+            } else {
+                if char == quotation && !escapeCharacter {
+                    isInQuotes = !isInQuotes
+                    // grabbing the matching correct object key as given in path
+                    if searchDepth == 0 || (advancedOffset + searchDepth) == notationBalance {
+                        isGrabbingKey = isInQuotes
+                        if isGrabbingKey {
+                            grabbingKey = []
+                        } else {
+                            needProcessKey = true
+                        }
                     }
-
-                    let bytesToAdd = Base._serializeToBytes(data, paths.count, tabUnitCount, QUOTATION)
-                    _continueCopyData(&iterator, &copiedBytes, bytesToAdd, dataType: 1)
-                    return nil
-                } else if (processedindex + 1) == notationBalance {
-                    isGrabbingKey = isQuotes
-                    if isGrabbingKey {
-                        grabbedKey = []
+                } else if isGrabbingKey {
+                    // section for accumulating characters for attribute key when light search is active
+                    if lightMatch[processedPathIndex] != 1 {
+                        if (char > 47 && char < 58) {
+                            grabbingKey.append(char)
+                        } else if (char > 64 && char < 91) {
+                            grabbingKey.append(char + 32)
+                        } else if (char > 96 && char < 123) {
+                            grabbingKey.append(char)
+                        }
+                    } else {
+                        grabbingKey.append(char)
+                    }
+                } else if needProcessKey && char == 58 {
+                    needProcessKey = false
+                    // if found start searching for object value for object key
+                    if isAttributeKeyMatch(lightMatch[processedPathIndex], grabbingKey, paths[processedPathIndex]) && arrayIndexes[processedPathIndex] == nil {
+                        processedPathIndex += 1
+                        advancedOffset += searchDepth
+                        if searchDepth == 0 {
+                            advancedOffset = notationBalance
+                        }
+                        startSearchValue = true
+                        
+                        // section responsible to when last attribute is found
+                        if(processedPathIndex == paths.count) {
+                            if writeMode == .delete {
+                                deleteData(&iterator, &copiedBytes, tabUnitCount, notationBalance)
+                                if restoreLastPointIfNeeded(isMultiple) { continue } else {
+                                    finishWriting()
+                                    return
+                                }
+                            } else if writeMode == .onlyInsert {
+                                if restoreLastPointIfNeeded() {
+                                    isObjectAttributeFound = true
+                                    continue
+                                }
+                                errorInfo = (ErrorCode.objectKeyAlreadyExists, processedPathIndex - 1)
+                                return
+                            } else {
+                                let bytesToAdd = Base.serializeToBytes(data, notationBalance, tabUnitCount, quotation)
+                                replaceData(&iterator, bytesToAdd, copiedBytes: &copiedBytes)
+                                if writeMode == .upsert {
+                                    isObjectAttributeFound = true
+                                }
+                                if restoreLastPointIfNeeded(isMultiple) { continue } else {
+                                    finishWriting()
+                                    return
+                                }
+                            }
+                        } else {
+                            addToTraversalHistoryIfNeeded()
+                        }
                     }
                 }
-            } else if isGrabbingKey {
-                grabbedKey.append(char)
             }
-            if isEscaping {
-                isEscaping = false
+            // handling escape characters at the end ...
+            if escapeCharacter {
+                escapeCharacter = false
             } else if char == 92 {
-                isEscaping = true
+                escapeCharacter = true
             }
-            copiedBytes.append(char)
         }
-        return (ErrorCode.other, processedindex)
+        
+        errorInfo = (ErrorCode.other, processedPathIndex)
+        return
     }
-    
-    private func _deleteData(_ iterator: inout UnsafeRawBufferPointer.Iterator, _ copiedData: inout [UInt8], _ tabUnitCount: Int, _ prevNotationBalnce: Int, _ pathCount: Int) {
+
+    private func deleteData(_ iterator: inout PeekIterator, _ copiedData: inout [UInt8], _ tabUnitCount: Int, _ prevNotationBalance: Int) {
         var didRemovedFirstComma = false
         var isInQuotes = false
-        var notationBalance = prevNotationBalnce
+        var notationBalance = prevNotationBalance
         var escapeCharacter = false
         
-        while true {
+        let quotation = quotation
+        
+        while iterator.hasNext() {
             guard let char = copiedData.last else { break }
-            if !escapeCharacter && char == QUOTATION {
+            if !escapeCharacter && char == quotation {
                 isInQuotes = !isInQuotes
             }
             if !isInQuotes {
@@ -408,9 +609,9 @@ internal class Base: State {
         escapeCharacter = false
         isInQuotes = false
         
-        while true {
-            guard let char = iterator.next() else { break }
-            if !escapeCharacter && char == QUOTATION {
+        while iterator.hasNext() {
+            let char = iterator.next()
+            if !escapeCharacter && char == quotation {
                 isInQuotes = !isInQuotes
             }
             if !isInQuotes {
@@ -418,48 +619,40 @@ internal class Base: State {
                     notationBalance += 1
                 } else if char == 125 || char == 93 {
                     notationBalance -= 1
-                    if notationBalance == (pathCount - 1) {
+                    if notationBalance == (prevNotationBalance - 1) {
                         if tabUnitCount != 0 {
                             if didRemovedFirstComma {
                                 copiedData.append(10)
-                                copiedData.append(contentsOf: [UInt8](repeating: 32, count: (pathCount - 1) * tabUnitCount))
+                                copiedData.append(contentsOf: [UInt8](repeating: 32, count: (prevNotationBalance - 1) * tabUnitCount))
                             }
                         }
-                        copiedData.append(char)
-                        break
+                        iterator.moveBack()
+                        return
                     }
+                } else if char == 44 && notationBalance == prevNotationBalance {
+                    if didRemovedFirstComma {
+                        copiedData.append(44)
+                    }
+                    return
                 }
             }
-            if char == 44 && notationBalance == pathCount {
-                if didRemovedFirstComma {
-                    copiedData.append(44)
-                }
-                break
-            }
+            
             if escapeCharacter {
                 escapeCharacter = false
             } else if char == 92 {
                 escapeCharacter = true
             }
         }
-        
-        while true {
-            guard let char = iterator.next() else { break }
-            copiedData.append(char)
-        }
-        
-        jsonDataMemoryHolder = copiedData
-        jsonData = jsonDataMemoryHolder.withUnsafeBytes({$0})
     }
 
-    internal func _getStructuredData(_ iterator: inout UnsafeRawBufferPointer.Iterator, firstCharacter: UInt8) -> (value: ValueStore, type: String) {
+    internal func getStructuredData(_ iterator: inout PeekIterator, firstCharacter: UInt8) -> (value: ValueStore, type: String) {
         var stack: [CollectionHolder] = []
         var isInQuotes = false
         var grabbedKey = ""
         var isGrabbingText = false
         var grabbedText = ""
         var notationBalance = 1
-        var shouldProccessObjectValue = false
+        var shouldProcessObjectValue = false
         var escapeCharacter = false
         
         if firstCharacter == 123 {
@@ -467,8 +660,10 @@ internal class Base: State {
         } else {
             stack.append(CollectionHolder(isObject: false))
         }
-        while true {
-            guard let char: UInt8 = iterator.next() else { break }
+        
+        let quotation = quotation
+        while iterator.hasNext() {
+            let char = iterator.next()
             if !isInQuotes {
                 if char == 123 || char == 91 {
                     notationBalance += 1
@@ -476,21 +671,21 @@ internal class Base: State {
                         stack.last!.reservedObjectKey = grabbedKey
                     }
                     stack.append(CollectionHolder(isObject: char == 123))
-                    shouldProccessObjectValue = false
+                    shouldProcessObjectValue = false
                 } else if char == 125 || char == 93 {
                     notationBalance -= 1
                     if isGrabbingText {
                         if stack.last!.type == "object" {
-                            stack.last!.objectCollection[grabbedKey] = parseSingularValue(_trimSpace(grabbedText))
+                            stack.last!.objectCollection[grabbedKey] = parseSingularValue(trimSpace(grabbedText))
                         } else {
-                            stack.last!.arrayCollection.append(parseSingularValue(_trimSpace(grabbedText)))
+                            stack.last!.arrayCollection.append(parseSingularValue(trimSpace(grabbedText)))
                         }
                         isGrabbingText = false
                     }
                     if notationBalance == 0 {
                         return stack.first!.type == "object" ? (ValueStore(parsedData: stack.last!.objectCollection), "object") : (ValueStore(parsedData: stack.last!.arrayCollection), "array")
                     }
-                    shouldProccessObjectValue = false
+                    shouldProcessObjectValue = false
                     let child = stack.removeLast()
                     if stack.last!.type == "object" {
                         stack.last!.assignChildToObject(child)
@@ -498,7 +693,7 @@ internal class Base: State {
                         stack.last!.appendChildToArray(child)
                     }
                 } else if char == 58 {
-                    shouldProccessObjectValue = true
+                    shouldProcessObjectValue = true
                     grabbedKey = grabbedText
                 } else if !isGrabbingText && ((char >= 48 && char <= 57) || char == 45
                     || char == 116 || char == 102
@@ -508,27 +703,27 @@ internal class Base: State {
                 } else if char == 44 && isGrabbingText {
                     isGrabbingText = false
                     if stack.last!.type == "object" {
-                        stack.last!.objectCollection[grabbedKey] = parseSingularValue(_trimSpace(grabbedText))
+                        stack.last!.objectCollection[grabbedKey] = parseSingularValue(trimSpace(grabbedText))
                     } else {
-                        stack.last!.arrayCollection.append(parseSingularValue(_trimSpace(grabbedText)))
+                        stack.last!.arrayCollection.append(parseSingularValue(trimSpace(grabbedText)))
                     }
-                    shouldProccessObjectValue = false
+                    shouldProcessObjectValue = false
                 }
             }
-            if !escapeCharacter && char == QUOTATION {
+            if !escapeCharacter && char == quotation {
                 isInQuotes = !isInQuotes
                 isGrabbingText = isInQuotes
                 if isGrabbingText {
                     grabbedText = ""
                 } else {
                     if stack.last!.type == "object" {
-                        if shouldProccessObjectValue {
+                        if shouldProcessObjectValue {
                             stack.last!.objectCollection[grabbedKey] = grabbedText
                         }
                     } else {
                         stack.last!.arrayCollection.append(grabbedText)
                     }
-                    shouldProccessObjectValue = false
+                    shouldProcessObjectValue = false
                 }
             } else if isGrabbingText {
                 grabbedText.append(Character(UnicodeScalar(char)))
@@ -542,16 +737,32 @@ internal class Base: State {
         return (ValueStore(parsedData: []), firstCharacter == 123 ? "object" : "array")
     }
     
-    private func _iterateArray(_ iterator: inout UnsafeRawBufferPointer.Iterator, elementIndex: Int) -> Bool {
+    private func iterateArray(_ iterator: inout PeekIterator, elementIndex: Int) -> Bool {
         var notationBalance = 1
-        var escapeChracter = false
+        var escapeCharacter = false
         var isQuotes = false
         var cursorIndex = 0
         
-        if elementIndex == 0 { return true }
-        while true {
-            guard let char = iterator.next() else { break }
-            if !escapeChracter && char == QUOTATION {
+        if elementIndex == 0 {
+            while iterator.hasNext() {
+                let char = iterator.next()
+                if !(char == 10 || char == 32) {
+                    iterator.moveBack()
+                    if char == 93 {
+                        return false
+                    }
+                    return true
+                }
+            }
+            return false
+            
+        }
+        
+        let quotation = quotation
+        
+        while iterator.hasNext() {
+            let char = iterator.next()
+            if !escapeCharacter && char == quotation {
                 isQuotes = !isQuotes
             }
             if !isQuotes {
@@ -560,6 +771,7 @@ internal class Base: State {
                 } else if char == 125 || char == 93 {
                     notationBalance -= 1
                     if notationBalance == 0 {
+                        iterator.moveBack()
                         return false
                     }
                 } else if char == 44 && notationBalance == 1 {
@@ -569,28 +781,41 @@ internal class Base: State {
                     }
                 }
             }
-            if escapeChracter {
-                escapeChracter = false
+            if escapeCharacter {
+                escapeCharacter = false
             } else if char == 92 {
-                escapeChracter = true
+                escapeCharacter = true
             }
         }
         return false
     }
     
-    private func _iterateArrayWrite(_ iterator: inout UnsafeRawBufferPointer.Iterator, elementIndex: Int, _ copyingData: inout [UInt8]) -> Bool {
+    private func iterateArrayWrite(_ iterator: inout PeekIterator, elementIndex: Int, _ copyingData: inout [UInt8]) -> Bool {
         var notationBalance = 1
-        var escapeChracter = false
+        var escapeCharacter = false
         var isQuotes = false
         var cursorIndex = 0
         
-        copyingData.append(91)
-        if elementIndex == 0 { return true }
+        if elementIndex == 0 {
+            while iterator.hasNext() {
+                let char = iterator.next()
+                if !(char == 10 || char == 32) {
+                    iterator.moveBack()
+                    if char == 93 {
+                        return false
+                    }
+                    return true
+                }
+            }
+            return false
+        }
         
-        while true {
-            guard let char = iterator.next() else { break }
+        let quotation = quotation
+        
+        while iterator.hasNext() {
+            let char = iterator.next()
             
-            if !escapeChracter && char == QUOTATION {
+            if !escapeCharacter && char == quotation {
                 isQuotes = !isQuotes
             }
             if !isQuotes {
@@ -599,6 +824,7 @@ internal class Base: State {
                 } else if char == 125 || char == 93 {
                     notationBalance -= 1
                     if notationBalance == 0 {
+                        iterator.moveBack()
                         return false
                     }
                 } else if char == 44 && notationBalance == 1 {
@@ -609,23 +835,246 @@ internal class Base: State {
                     }
                 }
             }
-            if escapeChracter {
-                escapeChracter = false
+            if escapeCharacter {
+                escapeCharacter = false
             } else if char == 92 {
-                escapeChracter = true
+                escapeCharacter = true
             }
             copyingData.append(char)
         }
         return false
     }
     
-    private func _grabData(_ copiedData: inout [UInt8], _ iterator: inout UnsafeRawBufferPointer.Iterator) {
+    private func iterateArrayWriteRecursive(_ iterator: inout PeekIterator, elementIndex: Int, _ copyingData: inout [UInt8], _ initialNotationBalance: Int, _ shouldRecurse: Bool, _ dataToAdd: Any?, _ updateMode: UpdateMode, _ isMultiple: Bool, _ tabUnitCount: Int) -> Bool {
+        var notationBalance = initialNotationBalance
+        let stopBalance = initialNotationBalance - 1
+        var escapeCharacter = false
+        var isQuotes = false
+        var cursorIndex = 0
+        var didProcessed = false
+        
+        let quotation = quotation
+        
+        if elementIndex == 0 {
+            while iterator.hasNext() {
+                let char = iterator.next()
+                
+                if !(char == 10 || char == 32) {
+                    iterator.moveBack()
+                    if char == 93 {
+                        copyingData.append(char)
+                        if updateMode == .onlyInsert || updateMode == .upsert {
+                            addData(notationBalance, false, dataToAdd, &copyingData, tabUnitCount, paths: [])
+                            copyingData.removeLast()
+                            return true
+                        }
+                        copyingData.removeLast()
+                        return false
+                    }
+                    if updateMode == .delete {
+                        deleteData(&iterator, &copyingData, tabUnitCount, notationBalance)
+                    } else if updateMode == .onlyInsert {
+                        addData(notationBalance, false, dataToAdd, &copyingData, tabUnitCount, paths: [], isIntermediateAdd: true, isFirstValue: true)
+                    } else {
+                        let replacingData = Base.serializeToBytes(dataToAdd, notationBalance, tabUnitCount, quotation)
+                        replaceData(&iterator, replacingData, copiedBytes: &copyingData)
+                    }
+                    return true
+                }
+                copyingData.append(char)
+            }
+            return false
+        }
+        
+        while iterator.hasNext() {
+            let char = iterator.next()
+            copyingData.append(char)
+            if !escapeCharacter && char == quotation {
+                isQuotes = !isQuotes
+            }
+            if !isQuotes {
+                if char == 123 || char == 91 {
+                    notationBalance += 1
+                    if char == 91 && shouldRecurse {
+                        didProcessed = iterateArrayWriteRecursive(&iterator, elementIndex: elementIndex, &copyingData, notationBalance, true, dataToAdd, updateMode, isMultiple, tabUnitCount)
+                        if !isMultiple && didProcessed {
+                            return true
+                        }
+                    }
+                } else if char == 125 || char == 93 {
+                    notationBalance -= 1
+                    if notationBalance == stopBalance {
+                        iterator.moveBack()
+                        if updateMode == .onlyInsert || updateMode == .upsert {
+                            addData(notationBalance + 1, false, dataToAdd, &copyingData, tabUnitCount, paths: [])
+                            copyingData.removeLast()
+                            return true
+                        }
+                        copyingData.removeLast()
+                        return didProcessed
+                    }
+                } else if char == 44 && notationBalance == initialNotationBalance {
+                    cursorIndex += 1
+                    if cursorIndex == elementIndex {
+                        if updateMode == .delete {
+                            deleteData(&iterator, &copyingData, tabUnitCount, notationBalance)
+                        } else if updateMode == .onlyInsert {
+                            addData(notationBalance, false, dataToAdd, &copyingData, tabUnitCount, paths: [], isIntermediateAdd: true)
+                        } else {
+                            let replacingData = Base.serializeToBytes(dataToAdd, notationBalance, tabUnitCount, quotation)
+                            replaceData(&iterator, replacingData, copiedBytes: &copyingData)
+                        }
+                        return true
+                    }
+                }
+            }
+            
+            if escapeCharacter {
+                escapeCharacter = false
+            } else if char == 92 {
+                escapeCharacter = true
+            }
+        }
+        return false
+    }
+
+    private func getNextElement(_ iterator: inout PeekIterator, _ quotation: UInt8, _ isCopyCollection: Bool) -> (value: ValueStore, type: String) {
+        var text = ""
+        var data: [UInt8] = []
+        while iterator.hasNext() {
+            let char = iterator.next()
+            if char == quotation {
+                var isEscape = false
+                while iterator.hasNext() {
+                    let stringChar = iterator.next()
+                    if !isEscape && stringChar == quotation {
+                        return (ValueStore(text), "string")
+                    }
+                    if isEscape {
+                        isEscape = false
+                    } else if stringChar == 92 {
+                        isEscape = true
+                    }
+                    text.append(Character(UnicodeScalar(stringChar)))
+                }
+            } else if char == 123 || char == 91 {
+                if extractInnerContent {
+                    return getStructuredData(&iterator, firstCharacter: char)
+                } else if isCopyCollection {
+                    if char == 123 {
+                        return (ValueStore(childData: getObjectEntries(&iterator)), "CODE_COLLECTION")
+                    } else {
+                        return (ValueStore(childData: getArrayValues(&iterator)), "CODE_COLLECTION")
+                    }
+                }
+                data = [char]
+                grabData(&data, &iterator)
+                return (ValueStore(data), char == 123 ? "object" : "array")
+            } else {
+                let result = getPrimitive(&iterator, char)
+                if let result {
+                    return (ValueStore(result.value), result.dataType)
+                }
+            }
+        }
+        return (ValueStore("no data to retrieve"), "string")
+    }
+    
+    private func iterateArrayRecursive(_ iterator: inout PeekIterator, elementIndex: Int, _ initialNotationBalance: Int, _ values: inout [JSONBlock], _ shouldRecurse: Bool, _ mode: Int, _ typeConstraint: String?) -> (ValueStore, String)? {
+        var notationBalance = initialNotationBalance
+        let stopBalance = initialNotationBalance - 1
+        var escapeCharacter = false
+        var isQuotes = false
+        var cursorIndex = 0
+        var innerItem: (ValueStore, String)? = nil
+        
+        let quotation = quotation
+        if elementIndex == 0 {
+            while iterator.hasNext() {
+                let char = iterator.next()
+                
+                if !(char == 10 || char == 32) {
+                    iterator.moveBack()
+                    if char == 93 {
+                        return nil
+                    }
+                    /*
+                        mode 0 - singular value
+                        mode 1 - collection data
+                        mode 2 - multiple data
+                     */
+                    let result = getNextElement(&iterator, quotation, mode == 1)
+                    if mode < 2 { return result }
+                    if typeConstraint == nil || typeConstraint == result.type {
+                        if result.value.isBytes {
+                            values.append(JSONBlock(result.value.memoryHolder, result.type, self))
+                        } else {
+                            values.append(JSONBlock(result.value.string, result.type))
+                        }
+                        return nil
+                    }
+                }
+            }
+            return nil
+        }
+        
+        while iterator.hasNext() {
+            let char = iterator.next()
+            if !escapeCharacter && char == quotation {
+                isQuotes = !isQuotes
+            }
+            if !isQuotes {
+                if char == 123 || char == 91 {
+                    notationBalance += 1
+                    if char == 91 && shouldRecurse {
+                        innerItem = iterateArrayRecursive(&iterator, elementIndex: elementIndex, initialNotationBalance, &values, true, mode, typeConstraint)
+                        // if innerItem is nil then it means this is a multiple data read
+                        if let innerItem {
+                            return innerItem
+                        }
+                    }
+                } else if char == 125 || char == 93 {
+                    notationBalance -= 1
+                    if notationBalance == stopBalance {
+                        iterator.moveBack()
+                        return nil
+                    }
+                } else if char == 44 && notationBalance == initialNotationBalance {
+                    cursorIndex += 1
+                    if cursorIndex == elementIndex {
+                        let result = getNextElement(&iterator, quotation, mode == 1)
+                        if mode < 2 { return result }
+                        if typeConstraint == nil || typeConstraint == result.type {
+                            if result.value.isBytes {
+                                values.append(JSONBlock(result.value.memoryHolder, result.type, self))
+                            } else {
+                                values.append(JSONBlock(result.value.string, result.type))
+                            }
+                            return nil
+                        }
+                    }
+                }
+            }
+            
+            if escapeCharacter {
+                escapeCharacter = false
+            } else if char == 92 {
+                escapeCharacter = true
+            }
+        }
+        return nil
+    }
+
+    
+    private func grabData(_ copiedData: inout [UInt8], _ iterator: inout PeekIterator) {
         var notationBalance = 1
         var isQuotes = false
         var isEscape = false
-        while true {
-            guard let char = iterator.next() else { break }
-            if !isEscape && char == QUOTATION {
+        
+        let quotation = quotation
+        while iterator.hasNext() {
+            let char = iterator.next()
+            if !isEscape && char == quotation {
                 isQuotes = !isQuotes
             }
             if !isQuotes {
@@ -653,7 +1102,7 @@ internal class Base: State {
         }
     }
     
-    private func _getObjectEntries(_ iterator: inout UnsafeRawBufferPointer.Iterator) -> [JSONChild] {
+    private func getObjectEntries(_ iterator: inout PeekIterator) -> [JSONChild] {
         var values: [JSONChild] = []
         var bytes: [UInt8] = []
         var text: String = ""
@@ -662,9 +1111,11 @@ internal class Base: State {
         var grabbedKey = ""
         var isEscaping = false
         var shouldGrabItem = false
-        while true {
-            guard let char = iterator.next() else { break }
-             if !isEscaping && char == QUOTATION {
+        
+        let quotation = quotation
+        while iterator.hasNext() {
+            let char = iterator.next()
+             if !isEscaping && char == quotation {
                 isQuotes = !isQuotes
                 if isQuotes {
                     text = ""
@@ -679,18 +1130,15 @@ internal class Base: State {
                 if char == 123 || char == 91 {
                     bytes = [char]
                     dataType = char == 123 ? "object" : "array"
-                    _grabData(&bytes, &iterator)
+                    grabData(&bytes, &iterator)
                     values.append(JSONChild(bytes, dataType, self).setKey(grabbedKey))
                     shouldGrabItem = false
                     continue
                 }
                 if shouldGrabItem {
-                    if let result = _getPrimitive(&iterator, char) {
+                    if let result = getPrimitive(&iterator, char) {
                         values.append(JSONChild(result.value, result.dataType, self).setKey(grabbedKey))
                         shouldGrabItem = false
-                        if result.didContainerClosed {
-                            return values
-                        }
                     }
                 } else if char == 58 {
                     shouldGrabItem = true
@@ -712,7 +1160,7 @@ internal class Base: State {
     }
 
     
-    private func _getArrayValues(_ iterator: inout UnsafeRawBufferPointer.Iterator) -> [JSONChild] {
+    private func getArrayValues(_ iterator: inout PeekIterator) -> [JSONChild] {
         var values: [JSONChild] = []
         var bytes: [UInt8] = []
         var text: String = ""
@@ -720,9 +1168,11 @@ internal class Base: State {
         var isQuotes = false
         var isEscaping = false
         var index = 0
-        while true {
-            guard let char = iterator.next() else { break }
-            if !isEscaping && char == QUOTATION {
+        
+        let quotation = quotation
+        while iterator.hasNext() {
+            let char = iterator.next()
+            if !isEscaping && char == quotation {
                 isQuotes = !isQuotes
                 if isQuotes {
                     text = ""
@@ -735,17 +1185,14 @@ internal class Base: State {
                 if char == 123 || char == 91 {
                     bytes = [char]
                     dataType = char == 123 ? "object" : "array"
-                    _grabData(&bytes, &iterator)
+                    grabData(&bytes, &iterator)
                     values.append(JSONChild(bytes, dataType, self).setIndex(index))
                     index += 1
                     continue
                 }
-                if let result = _getPrimitive(&iterator, char) {
+                if let result = getPrimitive(&iterator, char) {
                     values.append(JSONChild(result.value, result.dataType, self).setIndex(index))
                     index += 1
-                    if result.didContainerClosed {
-                        return values
-                    }
                 } else if char == 93 {
                     return values
                 }
@@ -762,148 +1209,165 @@ internal class Base: State {
         return values
     }
     
-    private func _getPrimitive(_ iterator: inout UnsafeRawBufferPointer.Iterator, _ firstCharacter: UInt8) -> (dataType: String, value: String, didContainerClosed: Bool)? {
+    private func getPrimitive(_ iterator: inout PeekIterator, _ firstCharacter: UInt8) -> (dataType: String, value: String)? {
         if firstCharacter == 116 {
-            return ("boolean", "true", false)
+            return ("boolean", "true")
         } else if firstCharacter == 102 {
-            return ("boolean", "false", false)
+            return ("boolean", "false")
         } else if firstCharacter == 110 {
-            return ("null", "null", false)
+            return ("null", "null")
         } else if (firstCharacter > 47 && firstCharacter < 58) || firstCharacter == 45 {
-            var didContainerClosed = false
             var copiedNumber = "\(Character(UnicodeScalar(firstCharacter)))"
-            while true {
-                guard let num = iterator.next() else { break }
+            while iterator.hasNext() {
+                let num = iterator.next()
                 if (num > 47 && num < 58) || num == 46 {
                     copiedNumber.append(Character(UnicodeScalar(num)))
                 } else {
                     if num == 125 || num == 93 {
-                        didContainerClosed = true
+                        iterator.moveBack()
                     }
                     break
                 }
             }
-            return ("number", copiedNumber, didContainerClosed)
+            return ("number", copiedNumber)
         }
         return nil
     }
     
-    private func _singleItemList(_ source: JSONBlock) -> (ValueStore, String) {
+    private func singleItemList(_ source: JSONBlock) -> (ValueStore, String) {
         return (ValueStore(arrayData: [source]), "CODE_ALL")
     }
     
     private func exploreData(_ inputPath: String,
-     _ copyCollectionData: Bool, _ grabAllPaths: Bool
+     _ copyCollectionData: Bool, _ grabAllPaths: Bool, _ multiCollectionTypeConstraint: String?
         ) -> (value: ValueStore, type: String)? {
         errorInfo = nil
         if !(contentType == "object" || contentType == "array") {
             errorInfo = (ErrorCode.nonNestableRootType, 0)
             return nil
         }
-        var (paths, lightMatch) = _splitPath(inputPath)
+        let (paths, lightMatch, arrayIndexes, searchDepths) = splitPath(inputPath)
         var processedPathIndex = 0
-        var isNavigatingUnknownPath = false
         var advancedOffset = 0
         var traversalHistory: [(processedPathIndex: Int, advancedOffset: Int)] = []
 
         var isInQuotes = false
         var startSearchValue = false
-        var isGrabbingText = false
-        var grabbedText = ""
-        var grabbedBytes: [UInt8] = []
         var grabbingKey:[UInt8] = []
         var needProcessKey = false
         var isGrabbingKey = false
-    
+        var searchDepth = 1
         var notationBalance = 0
-        var grabbingDataType: String = "string"
         var escapeCharacter: Bool = false
         var commonPathCollections: [JSONBlock] = []
+        
+        /*
+            mode 0 - singular value
+            mode 1 - collection data
+            mode 2 - multiple data
+         */
+        var extractMode = 0
+        if grabAllPaths {
+            extractMode = 2
+        } else if copyCollectionData {
+            extractMode = 1
+        }
         
         func restoreLastPointIfNeeded() -> Bool {
             if traversalHistory.count > 0 {
                 (processedPathIndex, advancedOffset) =  traversalHistory[traversalHistory.count - 1]
+                searchDepth = searchDepths[processedPathIndex]
                 startSearchValue = false
-                isNavigatingUnknownPath = true
                 return true
             }
             return false
         }
         
-        if paths.count == 0 && !copyCollectionData {
+        func isAttributeKeyMatch(_ lightMatch: Int, _ capturedKey: [UInt8], _ keyToMatch: [UInt8]) -> Bool {
+            if lightMatch < 3 {
+                return capturedKey == keyToMatch
+            }
+            var searchIndex = 0
+            for char in capturedKey {
+                if char == keyToMatch[searchIndex] {
+                    searchIndex += 1
+                    if searchIndex == keyToMatch.count {
+                        return true
+                    }
+                }
+            }
+            return false
+        }
+        
+        func addToTraversalHistoryIfNeeded() {
+            if searchDepths[processedPathIndex] == 0 {
+                traversalHistory.append((processedPathIndex, advancedOffset))
+            }
+            searchDepth = searchDepths[processedPathIndex]
+        }
+        
+        let quotation = quotation
+        
+        if paths.count == 0 {
+            if copyCollectionData {
+                var iterator = PeekIterator(jsonData)
+                return getNextElement(&iterator, quotation, true)
+            }
             errorInfo = (ErrorCode.emptyQueryPath, -1)
             return nil
         }
+        
         if paths.last == intermediateSymbol {
             errorInfo = (ErrorCode.captureUnknownElement, paths.count - 1)
             return nil
         }
-        var iterator = jsonData.makeIterator()
-        while true {
-            guard let char = iterator.next() else { break }
+        
+        var iterator = PeekIterator(jsonData)
+        
+        addToTraversalHistoryIfNeeded()
+        
+        while iterator.hasNext() {
+            let char = iterator.next()
             // if within quotation ignore processing json literals...
             if !isInQuotes {
                 if char == 123 || char == 91 {
                     notationBalance += 1
-                    // if the last value of last key is object or array then start copy it
-                    if processedPathIndex == paths.count {
-                        if extractInnerContent {
-                            return _getStructuredData(&iterator, firstCharacter: char)
-                        }
-                        if copyCollectionData {
-                            if char == 123 {
-                                return (ValueStore(childData: _getObjectEntries(&iterator)), "CODE_COLLECTION")
-                            }
-                            return (ValueStore(childData: _getArrayValues(&iterator)), "CODE_COLLECTION")
-                        }
-                        grabbedBytes = [char]
-                        grabbingDataType = char == 123 ? "object" : "array"
-                        _grabData(&grabbedBytes, &iterator)
-                        if grabAllPaths {
-                            if restoreLastPointIfNeeded() {
-                                commonPathCollections.append(JSONBlock(grabbedBytes, grabbingDataType, self))
-                                continue
-                            }
-                            return _singleItemList(JSONBlock(grabbedBytes, grabbingDataType))
-                        }
-                        return (ValueStore(grabbedBytes), grabbingDataType)
-                    }
-                    if paths[processedPathIndex] == intermediateSymbol {
-                        isNavigatingUnknownPath = true
-                        traversalHistory.append((processedPathIndex, advancedOffset))
-                        paths.remove(at: processedPathIndex)
-                    }
                     // initiate elements counting inside array on reaching open bracket...
-                    if char == 91 && ((advancedOffset + 1) == notationBalance || isNavigatingUnknownPath) {
-                        let parsedIndex = _toNumber(paths[processedPathIndex])
+                    if char == 91 && (searchDepth == 0 || (advancedOffset + searchDepth) == notationBalance) {
+                        let parsedIndex = arrayIndexes[processedPathIndex]
                         // occur when trying to access element of array with non-number index
                         if parsedIndex == nil {
-                            if isNavigatingUnknownPath || restoreLastPointIfNeeded() {
+                            if restoreLastPointIfNeeded() {
                                 continue
                             }
                             errorInfo = (ErrorCode.invalidArrayIndex, processedPathIndex)
                             return nil
                         }
-                        if isNavigatingUnknownPath {
-                            isNavigatingUnknownPath = false
-                            advancedOffset = notationBalance - 1
-                        }
-                        if !_iterateArray(&iterator, elementIndex: parsedIndex!) {
-                            if traversalHistory.count != 0 {
-                                if traversalHistory.count != 1 {
-                                    traversalHistory.removeLast()
-                                    paths.insert(intermediateSymbol, at: processedPathIndex)
-                                }
-                                (processedPathIndex, advancedOffset) = traversalHistory[traversalHistory.count - 1]
-                                isNavigatingUnknownPath = true
-                                continue
+                        
+                        if processedPathIndex == (paths.count - 1) {
+
+                            var values: [JSONBlock] = []
+                            let result = iterateArrayRecursive(&iterator, elementIndex: parsedIndex!, notationBalance, &values, searchDepth == 0, extractMode, multiCollectionTypeConstraint)
+                            if result != nil {
+                                return result.unsafelyUnwrapped
                             }
-                            errorInfo = (ErrorCode.arrayIndexNotFound, processedPathIndex)
-                            return nil
+                            let isRestored = restoreLastPointIfNeeded()
+                            if !values.isEmpty {
+                                if !isRestored {
+                                    return singleItemList(values[0])
+                                }
+                                commonPathCollections.append(contentsOf: values)
+                            }
+                        } else if iterateArray(&iterator, elementIndex: parsedIndex!) {
+                            
+                            advancedOffset += searchDepth
+                            processedPathIndex += 1
+                            if searchDepth == 0 {
+                                advancedOffset = notationBalance
+                            }
+                            startSearchValue = true
+                            addToTraversalHistoryIfNeeded()
                         }
-                        processedPathIndex += 1
-                        advancedOffset += 1
-                        startSearchValue = true
                     } else {
                         // move to next nest object and start looking attribute key on next nested object...
                         startSearchValue = false
@@ -913,25 +1377,26 @@ internal class Base: State {
                 
                 if char == 125 || char == 93 {
                     notationBalance -= 1
-                    // occur after all element in foccused array or object is finished searching...
-                    if notationBalance <= advancedOffset {
+                    // occur after all element in focused array or object is finished searching...
+                    if notationBalance == advancedOffset {
                         if traversalHistory.count != 0 {
-                            if traversalHistory.last!.advancedOffset <= advancedOffset {
-                                paths.insert(intermediateSymbol, at: traversalHistory.removeLast().processedPathIndex)
+                            if traversalHistory.last!.advancedOffset == advancedOffset {
+                                let lastIndex = traversalHistory.removeLast().processedPathIndex
                                 
                                 if traversalHistory.count == 0 {
                                     if grabAllPaths {
                                         return (ValueStore(arrayData: commonPathCollections), "CODE_ALL")
                                     }
-                                    errorInfo = (ErrorCode.cannotFindElement, notationBalance)
+                                    errorInfo = (ErrorCode.cannotFindElement, lastIndex)
                                     return nil
                                 }
                             }
                             (processedPathIndex, advancedOffset) = traversalHistory.last!
-                            isNavigatingUnknownPath = true
+                            searchDepth = searchDepths[processedPathIndex]
+                            startSearchValue = false
                             continue
                         }
-                        errorInfo = (char == 125 ? ErrorCode.objectKeyNotFound : ErrorCode.arrayIndexNotFound, notationBalance)
+                        errorInfo = (arrayIndexes[processedPathIndex] == nil ? ErrorCode.objectKeyNotFound : ErrorCode.arrayIndexNotFound, notationBalance)
                         return nil
                         
                     }
@@ -940,12 +1405,12 @@ internal class Base: State {
                 }
             }
             
-            // ======== FINISHED HALDING JSON OPEN AND CLOSE NOTATION ==========
+            // ======== FINISHED HANDING JSON OPEN AND CLOSE NOTATION ==========
             if startSearchValue {
                 if notationBalance == advancedOffset {
                     // ====== HANDLING GRABBING STRINGS =========
                     // ignore escaped double quotation characters inside string values...
-                    if !escapeCharacter && char == QUOTATION {
+                    if !escapeCharacter && char == quotation {
                         isInQuotes = !isInQuotes
                         // if not the last processed value skip capturing value
                         if processedPathIndex != paths.count {
@@ -955,24 +1420,13 @@ internal class Base: State {
                             errorInfo = (ErrorCode.nonNestedParent, processedPathIndex - 1)
                             return nil
                         }
-                        isGrabbingText = !isGrabbingText
-                        if !isGrabbingText {
-                            if grabAllPaths {
-                                if restoreLastPointIfNeeded() {
-                                    commonPathCollections.append(JSONBlock(grabbedText, "string", self))
-                                    continue
-                                }
-                                return  _singleItemList(JSONBlock(grabbedText, "string"))
-                            }
-                            return (ValueStore(grabbedText), "string")
-                        } else {
-                            grabbedText = ""
-                        }
                         // used to copy values true, false, null and number
                     } else {
-                        // ========== HANDLING GRABING NUMBERS, BOOLEANS AND NULL
-                        if !isInQuotes && !isGrabbingText {
-                            if let result = _getPrimitive(&iterator, char) {
+                        // ========== HANDLING GRABBING NUMBERS, BOOLEANS AND NULL
+                        if !isInQuotes {
+                            if (char >= 48 && char <= 57) || char == 45
+                                || char == 116 || char == 102
+                                || char == 110 {
                                 if processedPathIndex != paths.count {
                                     if restoreLastPointIfNeeded() {
                                         continue
@@ -980,29 +1434,19 @@ internal class Base: State {
                                     errorInfo = (ErrorCode.nonNestedParent, processedPathIndex - 1)
                                     return nil
                                 }
-                                if grabAllPaths {
-                                    if restoreLastPointIfNeeded() {
-                                        commonPathCollections.append(JSONBlock(result.value,  result.dataType, self))
-                                        continue
-                                    }
-                                    return _singleItemList(JSONBlock(result.value, result.dataType))
-                                }
-                                return (ValueStore(result.value), result.dataType)
                             }
-                        } else if isGrabbingText {
-                            grabbedText.append(Character(UnicodeScalar(char)))
                         }
                     }
-                } else if char == QUOTATION && !escapeCharacter {
+                } else if char == quotation && !escapeCharacter {
                     isInQuotes = !isInQuotes
                 }
                 
                 // ========= SECTION RESPONSIBLE HANDLING OBJECT KEY
             } else {
-                if char == QUOTATION && !escapeCharacter {
+                if char == quotation && !escapeCharacter {
                     isInQuotes = !isInQuotes
                     // grabbing the matching correct object key as given in path
-                    if (advancedOffset + 1) == notationBalance || isNavigatingUnknownPath {
+                    if searchDepth == 0 || (advancedOffset + searchDepth) == notationBalance {
                         isGrabbingKey = isInQuotes
                         if isGrabbingKey {
                             grabbingKey = []
@@ -1011,7 +1455,7 @@ internal class Base: State {
                         }
                     }
                 } else if isGrabbingKey {
-                    if lightMatch[lightMatch.count - (paths.count - processedPathIndex)] {
+                    if lightMatch[processedPathIndex] != 1 {
                         if (char > 47 && char < 58) {
                             grabbingKey.append(char)
                         } else if (char > 64 && char < 91) {
@@ -1025,13 +1469,33 @@ internal class Base: State {
                 } else if needProcessKey && char == 58 {
                     needProcessKey = false
                     // if found start searching for object value for object key
-                    if grabbingKey == paths[processedPathIndex] {
+                    if isAttributeKeyMatch(lightMatch[processedPathIndex], grabbingKey, paths[processedPathIndex]) && arrayIndexes[processedPathIndex] == nil {
                         processedPathIndex += 1
-                        advancedOffset += 1
-                        startSearchValue = true
-                        if isNavigatingUnknownPath {
-                            isNavigatingUnknownPath = false
+                        advancedOffset += searchDepth
+                        if searchDepth == 0 {
                             advancedOffset = notationBalance
+                        }
+                        startSearchValue = true
+                        if processedPathIndex == paths.count {
+                            if !grabAllPaths {
+                                return getNextElement(&iterator, quotation, false)
+                            }
+                            
+                            let (value, type) = getNextElement(&iterator, quotation, copyCollectionData)
+                            let elementToAdd: JSONBlock
+                            let isRestored = restoreLastPointIfNeeded()
+                            if !(multiCollectionTypeConstraint == nil || multiCollectionTypeConstraint == type) { continue }
+                            if value.isBytes {
+                                elementToAdd = JSONBlock(value.memoryHolder, type, self)
+                            } else {
+                                elementToAdd = JSONBlock(value.string, type)
+                            }
+                            if !isRestored {
+                                return singleItemList(elementToAdd)
+                            }
+                            commonPathCollections.append(elementToAdd)
+                        } else {
+                            addToTraversalHistoryIfNeeded()
                         }
                     }
                 }
@@ -1047,16 +1511,17 @@ internal class Base: State {
         return nil
     }
     
-    internal func identifyStringDelimter(_ text: String) {
+    internal func identifyStringDelimiter(_ text: String) {
         for char in text {
             if char == "\"" || char == "'" {
-                QUOTATION = char == "\"" ? 34 : 39
+                quotation = char == "\"" ? 34 : 39
                 break
             }
         }
     }
     
-    internal func _prettyifyContent(_ originalContent: UnsafeRawBufferPointer) -> String {
+    internal func prettifyContent(_ originalContent: UnsafeRawBufferPointer, _ tabSize: Int) -> String {
+        var iterator = PeekIterator(originalContent)
         var presentation: [UInt8] = []
         var notationBalance = 0
         var isEscaping = false
@@ -1064,24 +1529,37 @@ internal class Base: State {
         if originalContent[1] == 10 { // already being pretty...
             return String(originalContent.map({Character(UnicodeScalar($0))}))
         }
-        for char in originalContent {
-            if !isEscaping && char == QUOTATION {
+        
+        let quotation = quotation
+        
+        while iterator.hasNext() {
+            let char = iterator.next()
+            if !isEscaping && char == quotation {
                 isQuotes = !isQuotes
             } else if !isQuotes {
                 if char == 123 || char == 91 {
+                    if iterator.hasNext() {
+                        let nextChar = iterator.next()
+                        if nextChar == 125 || nextChar == 93 {
+                            presentation.append(char)
+                            presentation.append(nextChar)
+                            continue
+                        }
+                        iterator.moveBack()
+                    }
                     notationBalance += 1
                     presentation.append(char)
                     presentation.append(10)
-                    presentation.append(contentsOf: [UInt8] (repeating: 32, count: notationBalance * 3))
+                    presentation.append(contentsOf: [UInt8] (repeating: 32, count: notationBalance * tabSize))
                     continue
                 } else if char == 125 || char == 93 {
                     notationBalance -= 1
                     presentation.append(10)
-                    presentation.append(contentsOf: [UInt8] (repeating: 32, count: notationBalance * 3))
+                    presentation.append(contentsOf: [UInt8] (repeating: 32, count: notationBalance * tabSize))
                 } else if char == 44 {
                     presentation.append(char)
                     presentation.append(10)
-                    presentation.append(contentsOf: [UInt8] (repeating: 32, count: notationBalance * 3))
+                    presentation.append(contentsOf: [UInt8] (repeating: 32, count: notationBalance * tabSize))
                     continue
                 } else if char == 58 {
                     presentation.append(char)
@@ -1100,8 +1578,8 @@ internal class Base: State {
         return String(presentation.map({Character(UnicodeScalar($0))}))
     }
     
-    internal func decodeData(_ inputPath:String, copyCollectionData: Bool = false, grabAllPaths: Bool = false) -> (value: ValueStore, type: String)? {
-        let results = exploreData(inputPath, copyCollectionData, grabAllPaths)
+    internal func decodeData(_ inputPath:String, copyCollectionData: Bool = false, grabAllPaths: Bool = false, multiCollectionTypeConstraint: String? = nil) -> (value: ValueStore, type: String)? {
+        let results = exploreData(inputPath, copyCollectionData, grabAllPaths, multiCollectionTypeConstraint)
         if let errorInfo {
             errorHandler?(ErrorInfo(errorInfo.code, errorInfo.occurredQueryIndex, inputPath))
             errorHandler = nil
@@ -1109,7 +1587,7 @@ internal class Base: State {
         return results
     }
     
-    private func _isLastCharacterOpenNode(_ data: inout [UInt8]) -> Bool {
+    private func isLastCharacterOpenNode(_ data: inout [UInt8]) -> Bool {
         while true {
             if data.last == 10 || data.last == 32 {
                 data.removeLast()
@@ -1118,78 +1596,120 @@ internal class Base: State {
             }
         }
     }
-    
-    private func _toNumber(_ bytes:[UInt8]) -> Int? {
-        var ans: Int = 0
-        var bytesCopy = bytes
-        var isNegative = false
-        if bytesCopy.first == 45 {
-            isNegative = true
-            bytesCopy.removeFirst()
-        }
-        for b in bytesCopy {
-            if b < 48 || b > 57 {
+
+    private func getIntermediateSymbolDepthLimit(_ word: [UInt8]) -> Int? {
+        var matchIndex = 0
+        var stage = 0
+        var index = 0
+        for char in word {
+            if stage == 0 && char == intermediateSymbol[matchIndex] {
+                matchIndex += 1
+                if matchIndex == intermediateSymbol.count {
+                    stage = 1
+                }
+            } else if stage == 1 && char == 123 {
+                stage = 2
+            } else if stage > 1 && (char > 47 && char < 58) {
+                index = (index * 10) + (Int(char) - 48)
+                stage = 3
+            } else if stage == 3 && char == 125 {
+                return index == 0 ? 1 : index
+            } else {
                 return nil
             }
-            ans *= 10
-            ans += Int(b - 48)
+            
         }
-        if isNegative {
-            ans *= -1
+        
+        if stage == 1 {
+            return 0
         }
-        return ans
+        return nil
     }
     
-    private func _splitPath(_ path: String) -> (paths: [[UInt8]], lightMatch: [Bool]) {
+    private func splitPath(_ path: String) -> (paths: [[UInt8]], lightMatch: [Int], arrayIndexes: [Int?], searchDepths: [Int]) {
         var paths: [[UInt8]] = []
-        var lightMatch: [Bool] = []
+        var lightMatch: [Int] = []
         var word: [UInt8] = []
-        let splitByte: UInt8 = pathSpliter.utf8.first.unsafelyUnwrapped
-        var repetitionCombo = 0
+        var arrayIndex: Int = 0
+        var pathIndex = 0
+        var isNumber = true
+        var numberSign = 1
+        var arrayIndexes: [Int?] = []
+        let splitByte: UInt8 = pathSplitter.utf8.first.unsafelyUnwrapped
+        var repetitionCombo = 1
+        var searchDepths: [Int] = []
+        var assignedDepth = 1
         
         if path.isEmpty {
-            return (paths, lightMatch)
+            return (paths, lightMatch, arrayIndexes, searchDepths)
         }
+        
         let pathBytes = Array(path.utf8)
         for char in pathBytes {
             if char == splitByte {
                 if !word.isEmpty {
-                    paths.append(word)
+                    let depth = getIntermediateSymbolDepthLimit(word)
+                    if let depth {
+                        assignedDepth = depth
+                    } else {
+                        arrayIndexes.append(isNumber ? arrayIndex * numberSign : nil)
+                        lightMatch.append(repetitionCombo)
+                        paths.append(word)
+                        searchDepths.append(assignedDepth)
+                        assignedDepth = 1
+                    }
+                    pathIndex += 1
                     word = []
-                    lightMatch.append(repetitionCombo == 2)
+                    isNumber = true
+                    numberSign = 1
+                    arrayIndex = 0
                     repetitionCombo = 0
                 }
                 repetitionCombo += 1
             } else {
-                if(repetitionCombo == 2) {
-                    if ((char > 96 && char < 123)
-                        || (char > 47 && char < 58)
-                    ) {
+                if repetitionCombo == 1 {
+                    if (char > 47 && char < 58) {
+                        if isNumber {
+                            arrayIndex = (arrayIndex * 10) + (Int(char) - 48)
+                        }
+                    } else if isNumber && char == 45 {
+                        numberSign = numberSign == 1 ? -1 : 1
+                    } else {
+                        isNumber = false
+                    }
+                    word.append(char)
+                } else {
+                    isNumber = false
+                    if (char > 96 && char < 123) || (char > 47 && char < 58) {
                         word.append(char)
-                    } else if char > 64 && char < 91 {
+                    }  else if char > 64 && char < 91 {
                         word.append(char + 32)
                     }
-                } else {
-                    word.append(char)
                 }
             }
         }
-        
-        lightMatch.append(repetitionCombo == 2)
+        arrayIndexes.append(isNumber ? arrayIndex * numberSign : nil)
+        lightMatch.append(repetitionCombo)
         paths.append(word)
-        
-        if pathSpliter != "." {
-            pathSpliter = "."
+        let lastDepth = getIntermediateSymbolDepthLimit(word)
+        if lastDepth == nil {
+            searchDepths.append(assignedDepth)
+        } else {
+            paths.append(intermediateSymbol)
         }
-        print((paths.map({_asString($0)}), lightMatch))
-        return (paths, lightMatch)
+        
+        if pathSplitter != "." {
+            pathSplitter = "."
+        }
+
+        return (paths, lightMatch, arrayIndexes, searchDepths)
     }
     
-    private func _asString(_ bytes: [UInt8]) -> String {
+    private func asString(_ bytes: [UInt8]) -> String {
         return String(bytes.map({Character(UnicodeScalar($0))}))
     }
     
-    private func _trimSpace(_ input: String) -> String {
+    private func trimSpace(_ input: String) -> String {
         var output = input
         while(output.last!.isWhitespace) {
             output.removeLast()
@@ -1208,6 +1728,4 @@ internal class Base: State {
             return Double(input) ?? "#INVALID_NUMERIC"
         }
     }
-
-        
 }

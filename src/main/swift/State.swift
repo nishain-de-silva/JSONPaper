@@ -14,7 +14,7 @@ internal class State {
     internal var intermediateSymbol: [UInt8] = [63, 63, 63]
     internal var errorHandler: ((ErrorInfo) -> Void)? = nil
     internal var errorInfo: (code: ErrorCode, occurredQueryIndex: Int)? = nil
-    internal var pathSpliter: Character = "."
+    internal var pathSplitter: Character = "."
     internal var isBubbling: Bool = false
-    internal var QUOTATION: UInt8 = 34
+    internal var quotation: UInt8 = 34
 }
