@@ -1,0 +1,28 @@
+name: publish to maven central staging
+on:
+  release:
+    types: [published]
+
+jobs:
+  publish:
+    runs-on: macos-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v3
+      - name: setting up java 11
+        uses: actions/setup-java@v3
+        with:
+          distribution: temurin
+          java-version: 11
+      - name: creating environmental files
+        run: |
+          touch local.properties
+          echo "${{ secrets.LOCALPROPERTIES }}" > local.properties
+          touch secretkey.gpg
+          echo "${{ secrets.SECRETKEYGPG }}" > secretkey.gpg
+          echo "check ${{ vars.SonatypeUrl }} for staged publication"
+      - name: "setup gradle and publish to maven"
+        uses:  gradle/gradle-build-action@v2
+        with:
+          gradle-version: 7.4
+          arguments: publish
