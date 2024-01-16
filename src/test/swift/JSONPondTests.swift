@@ -25,7 +25,7 @@ final class JSONPondTest: XCTestCase {
         // Any test you write for XCTest can be annotated as throws and async.
         // Mark your test throws to produce an unexpected failure when your test encounters an uncaught error.
         // Mark your test async to allow awaiting for asynchronous code to complete. Check the results w;;ith expections afterwards.
-        let path = Bundle.module.path(forResource: "test2", ofType: "json")
+        let path = Bundle.module.path(forResource: "large-file", ofType: "json")
         do {
             let jsonData = try Data(contentsOf: URL(fileURLWithPath: path!))
             let start = Date()
@@ -35,10 +35,10 @@ final class JSONPondTest: XCTestCase {
                 .onQueryFail({
                     print($0.explain())
                 })
-            
-                .delete("???.location.meta").stringify()
-            print(result)
+                .stringify("11350")
+        
             print("elapsed time - ", Date().timeIntervalSince(start))
+            print(result ?? "nothing")
         } catch {
             print(error)
         }

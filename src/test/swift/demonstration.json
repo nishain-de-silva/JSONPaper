@@ -1,0 +1,66 @@
+{
+  "details": {
+    "profile": {
+      "firstName": "Joe",
+      "lastName": "Smith",
+      "age": 21,
+      "ageAsString": "21",
+      "knownCoordinate": null,
+      "printable": "{'firstName': 'Joe', 'lastName': 'Smith', 'age': 50}"
+    },
+    "shoppingCart": {
+      "addedOn": "12/7/2023",
+      "items": ["orange", "apple", "mango"],
+      "price": 450,
+      "deduction": -12.5
+    },
+    "relations": {
+      "friends": [
+        {
+          "_id": 45,
+          "firstName": "Sally",
+          "lastName": "McRune",
+          "age": 21
+        },
+        {
+          "#ID": 65,
+          "firstName": "Tom",
+          "lastName": "physics",
+          "age": 25
+        }
+      ],
+      "family": [
+        {
+          "firstName": "Noe",
+          "age": 57,
+          "friends": "['Oreo', null, {'name': 'Kamal', 'knownAs': 'school-friend' }]"
+        }
+      ]
+    },
+    "bioData": {
+      "hobbies": [
+        "coding",
+        "walking"
+      ],
+      "likes": [
+        "music",
+        "bird watching"
+      ]
+    },
+    "environment": {
+      "temperature": 47.8,
+      "previous": {
+        "temperature": [-12, 55, 5, 10],
+        "lowest": {
+          "temperature": -12,
+          "recorded": 2015
+        }
+      },
+      "isWarm": true,
+      "majorSpecies": [
+        "sunflower",
+        "orchid"
+      ]
+    }
+  }
+}

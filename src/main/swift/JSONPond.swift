@@ -18,16 +18,17 @@ public enum JSONType: String {
 }
 
 public enum ErrorCode: String {
-    case objectKeyNotFound = "cannot find object attribute"
-    case arrayIndexNotFound = "cannot find given index within array bounds"
+    case objectKeyNotFound = "cannot find object attribute that matches of required data type"
+    case arrayIndexNotFound = "cannot find given index within array bounds or data type of element does not match"
     case invalidArrayIndex = "array index is not a integer number"
     case objectKeyAlreadyExists = "cannot insert because object attribute already exists"
-    case nonMatchingDataType = "the data type of value of the value does not match with expected data type that is required from query method"
+    case nonMatchingDataType = "the data type of the value does not match with expected data type that is required from query method"
     case nonNestableRootType = "root data type is neither array or object and cannot transverse"
     case nonNestedParent = "intermediate parent is a leaf node and non-nested. Cannot transverse further"
-    case emptyQueryPath = "query path cannot be empty at this query usage"
-    case captureUnknownElement = "the path cannot be end with a intermediate representer token"
+    case emptyQueryPath = "query path cannot be empty"
+    case captureUnknownElement = "the path cannot be end with a intermediate represented token"
     case cannotFindElement = "unable to find any element that matches the given path pattern"
+    case cannotFindObjectKeys = "instance is not an object type therefore cannot find any keys"
     case other = "something went wrong. Target element cannot be found"
     
     /// Provide string representation of error.
@@ -55,6 +56,45 @@ public class ErrorInfo {
     }
 }
 
+public class JSONCollection: Collection {
+    var data: [JSONChild]
+    var isArrayContainer: Bool
+    public var startIndex: Int
+    public var endIndex: Int
+    
+    internal init(_ data: [JSONChild], isArray: Bool) {
+        self.data = data
+        startIndex = data.startIndex
+        endIndex = data.endIndex
+        isArrayContainer = isArray
+    }
+
+    internal init() {
+        self.data = []
+        startIndex = 0
+        endIndex = 0
+        isArrayContainer = false
+    }
+
+    /// Check if this collection is an array type.
+    public func isArray() -> Bool {
+        return isArrayContainer
+    }
+    
+    /// Get keys of each item in key if items are extracted from object.
+    public func keys() -> [String]? {
+        if isArrayContainer { return nil }
+        return data.map { $0.key }
+    }
+    
+    public subscript(position: Int) -> JSONChild {
+        return data[position]
+    }
+    
+    public func index(after i: Int) -> Int {
+        data.index(after: i)
+    }
+}
 
 public class JSONChild : JSONBlock {
     /// Name attribute of this element in the parent object.
@@ -67,6 +107,11 @@ public class JSONChild : JSONBlock {
         key = newKey
         return self
     }
+
+    /// Check if this instance is an array child.
+    public func isArrayItem() -> Bool {
+        return index > -1
+    }
     
     internal func setIndex(_ newIndex: Int) -> JSONChild {
         index = newIndex
@@ -76,7 +121,7 @@ public class JSONChild : JSONBlock {
 
 public class JSONBlock {
     
-    private var base: Base = Base()
+    internal var base: Base = Base()
     
     private static let INVALID_START_CHARACTER_ERROR = "[JSONPond] the first character of given json content is neither starts with '{' or '['. Make sure the given content is valid JSON"
     private static let INVALID_BUFFER_INITIALIZATION = "[JSONPond] instance has not properly initialized. Problem had occured when assigning input data buffer which occur when the provider callback given on .init(provider:) gives nil or when exception thrown within provider callback itself. Check the result given by by provider callback to resolve the issue."
@@ -120,51 +165,6 @@ public class JSONBlock {
         }
     }
     
-//    /// Provide mirror callback to recieve UnsafeRawBufferPointer instance.
-//    public init(_ provider:  ((UnsafeRawBufferPointer?) throws -> UnsafeRawBufferPointer?) throws -> UnsafeRawBufferPointer?) {
-//        guard let buffer = try? provider({$0}) else {
-//            print(JSONBlock.INVALID_BUFFER_INITIALIZATION)
-//            base.contentType = "string"
-//            return
-//        }
-//        base.jsonData = buffer
-//        switch(base.jsonData.first) {
-//        case 123: base.contentType = "object"
-//        case 91: base.contentType = "array"
-//        default:
-//            print(JSONBlock.INVALID_START_CHARACTER_ERROR)
-//            base.contentType = "string"
-//        }
-//    }
-//
-//    /// Provide mirror callback to receive UnsafeRawBufferPointer instance.
-//    public init(_ provider:  ((UnsafeRawBufferPointer?)  -> UnsafeRawBufferPointer?) -> UnsafeRawBufferPointer?) {
-//        guard let buffer = provider({$0}) else {
-//            print(JSONBlock.INVALID_BUFFER_INITIALIZATION)
-//            base.contentType = "string"
-//            return
-//        }
-//        base.jsonData = buffer
-//        switch(base.jsonData.first) {
-//        case 123: base.contentType = "object"
-//        case 91: base.contentType = "array"
-//        default:
-//            print(JSONBlock.INVALID_START_CHARACTER_ERROR)
-//            base.contentType = "string"
-//        }
-//    }
-    
-//    public init(_ data: Data) {
-//        let buffer = data.withUnsafeBytes({$0})
-//        base.jsonData = buffer
-//        switch(base.jsonData.first) {
-//            case 123: base.contentType = "object"
-//            case 91: base.contentType = "array"
-//            default:
-//                print(JSONBlock.INVALID_START_CHARACTER_ERROR)
-//                base.contentType = "string"
-//        }
-//    }
     
     // ======= PRIVATE INITIALIZERS =====
     internal init(_ json: String, _ type: String, _ parent: Base? = nil) {
@@ -202,7 +202,7 @@ public class JSONBlock {
     /// Intermediate token capture zero or more dynamic intermediate paths. Default token is ???.
     public func setIntermediateGroupToken (_ representer: String) -> JSONBlock {
         if Int(representer) != nil {
-            print("[JSONPond] intermediate represent strictly cannot be a number!")
+            print("[JSONPond] intermediate represent cannot be a number!")
             return self
         }
         base.intermediateSymbol = Array(representer.utf8)
@@ -234,25 +234,13 @@ public class JSONBlock {
         return type == "null"
     }
     
+    /// Get keys of the current instance only if the current instance is an object type.
+    public func keys() -> [String]? {
+        return base.getKeys()
+    }
+    
     /// Get JSON object in the given path. Activate ignoreType to parse JSON representable string if possible.
-    public func objectEntry(_ path:String? = nil, ignoreType: Bool = false) -> JSONBlock? {
-        if path == nil {
-            if base.contentType == "object" {
-                return self
-            } else if ignoreType && base.contentType == "string" {
-                let element = JSONBlock(base.jsonText, "object", base)
-                if base.isBubbling {
-                    element.base.isBubbling = true
-                    element.base.errorHandler = base.errorHandler
-                }
-                return element
-            }
-            if base.errorHandler != nil {
-                base.errorHandler!(ErrorInfo(ErrorCode.nonMatchingDataType, -1, ""))
-                base.errorHandler = nil
-            }
-            return nil
-        }
+    public func objectEntry(_ path: String? = nil, ignoreType: Bool = false) -> JSONBlock? {
         let element = base.getField(path, "object", {
             // have to make sure value is string and not bytes...
             if ignoreType && $0.memoryHolder.count == 0 {
@@ -273,24 +261,11 @@ public class JSONBlock {
     }
     
     /// Get collection of items either from array or object. Gives array of [JSONChild] which each has property index and key which either has a value based on parent is a object or an array.
-    public func collection(_ path: String? = nil, ignoreType: Bool = false) -> [JSONChild]? {
+    public func collection(_ path: String? = nil, ignoreType: Bool = false) -> JSONCollection? {
         guard let data = base.decodeData(path ?? "",
-         copyCollectionData: true) else {
-            return nil
-        }
-        if ignoreType && data.type == "string"{
+         copyCollectionData: true, typeConstraint: TypeConstraint("CODE_COLLECTION", canStringParse: ignoreType)) else { return nil }
+        if ignoreType && data.type == "string" {
             return JSONBlock(data.value.string).collection()
-        }
-        if data.type != "CODE_COLLECTION" {
-            if base.errorHandler != nil {
-                base.errorHandler!(ErrorInfo(
-                    ErrorCode.nonMatchingDataType,
-                    (path?.split(separator: base.pathSplitter).count ?? 0) - 1,
-                    path ?? ""
-                ))
-                base.errorHandler = nil
-            }
-            return nil
         }
         return data.value.children
     }
@@ -317,6 +292,12 @@ public class JSONBlock {
         return (base.resolveValue(value.string, value.memoryHolder, type), JSONType(type))
     }
     
+    /// Get the data type of the value matches the given path.
+    public func type(_ path: String) -> JSONType? {
+        guard let type = base.decodeData(path)?.type else { return nil }
+        return JSONType(type)
+    }
+    
     /// Get the data type of the value held by the content of this node.
     public func type() -> JSONType {
         return JSONType(base.contentType)
@@ -324,7 +305,7 @@ public class JSONBlock {
 
     /// write JSON content from scratch recursively. use mapOf and listOf() to write object and array content respectively.
     public static func write(_ jsonData: Any, prettify: Bool = true) -> JSONBlock {
-        let generatedBytes = Base.serializeToBytes(jsonData, 0, prettify ? 4 : 0, 34)
+        let generatedBytes = Base.serializeToBytes(jsonData, 34)
         if generatedBytes.first == 34 {
             return JSONBlock(String(
                 generatedBytes.map({Character(UnicodeScalar($0))})
@@ -345,44 +326,28 @@ public class JSONBlock {
     @discardableResult
     /// Update the given given query path.
     public func replace(_ path: String, _ data: Any?, multiple: Bool = false) -> JSONBlock {
-        base.write(path, data, writeMode: .onlyUpdate, multiple)
-        if base.errorInfo != nil {
-            base.errorHandler?(ErrorInfo(base.errorInfo!.code, base.errorInfo!.occurredQueryIndex, path))
-            base.errorHandler = nil
-        }
+        base.handleWrite(path, data, .delete, multiple)
         return self
     }
     
     @discardableResult
     /// Insert an element to the given query path. Last segment of the path should address to attribute name / array index to insert on objects / arrays.
     public func insert(_ path: String, _ data: Any?, multiple: Bool = false) -> JSONBlock {
-        base.write(path, data, writeMode: .onlyInsert, multiple)
-        if base.errorInfo != nil {
-            base.errorHandler?(ErrorInfo(base.errorInfo!.code, base.errorInfo!.occurredQueryIndex, path))
-            base.errorHandler = nil
-        }
+        base.handleWrite(path, data, .onlyInsert, multiple)
         return self
     }
         
     @discardableResult
     /// Update or insert data to node of the given query path.
     public func upsert(_ path: String, _ data: Any?, multiple: Bool = false) -> JSONBlock {
-        base.write(path, data, writeMode: .upsert, multiple)
-        if base.errorInfo != nil {
-            base.errorHandler?(ErrorInfo(base.errorInfo!.code, base.errorInfo!.occurredQueryIndex, path))
-            base.errorHandler = nil
-        }
+        base.handleWrite(path, data, .upsert, multiple)
         return self
     }
     
     @discardableResult
     /// delete path if exists. Return if delete successfully or not.
     public func delete(_ path: String, multiple: Bool = false) -> JSONBlock {
-        base.write(path, 0, writeMode: .delete, multiple)
-        if base.errorInfo != nil {
-            base.errorHandler?(ErrorInfo(base.errorInfo!.code, base.errorInfo!.occurredQueryIndex, path))
-            base.errorHandler = nil
-        }
+        base.handleWrite(path, 0, .delete, multiple)
         return self
     }
     
@@ -455,6 +420,6 @@ public class JSONBlock {
     
     /// Get collection all values that matches the given path. typeOf parameter to include type constraint else items are not type filtered.
     public func all(_ path: String, typeOf: JSONType? = nil) -> [JSONBlock] {
-        return base.decodeData(path, grabAllPaths: true, multiCollectionTypeConstraint: typeOf?.rawValue)?.value.array ?? []
+        return base.decodeData(path, grabAllPaths: true, typeConstraint: TypeConstraint(typeOf?.rawValue, canStringParse: false))?.value.array ?? []
     }
 }

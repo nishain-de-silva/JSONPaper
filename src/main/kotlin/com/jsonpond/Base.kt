@@ -18,12 +18,25 @@ internal class ByteWrapper(var bytes: ByteArray = byteArrayOf()) {
         return bytes.last()
     }
 }
+
+internal class TypeConstraint(
+    private val requiredType: String? = null,
+    private val canStringParse: Boolean = false
+) {
+
+    fun isTypeMatch(type: String): Boolean {
+        return requiredType == null
+                || requiredType == type
+                || (canStringParse && type == "string")
+    }
+}
+
 internal data class ValueType(val value: ValueStore, val type: String)
 internal class ValueStore {
     var string: String = ""
     var bytes: ByteArray = byteArrayOf()
     var array: Array<JSONBlock> = arrayOf()
-    var children: Array<JSONChild> = arrayOf()
+    var children = JSONCollection()
     var tree: Any = listOf(0)
     var isBytes = false
 
@@ -41,7 +54,7 @@ internal class ValueStore {
         array = arrayData
     }
 
-    constructor(childData: Array<JSONChild>) {
+    constructor(childData: JSONCollection) {
         children = childData
     }
 
@@ -62,30 +75,7 @@ internal enum class UpdateMode {
     Delete
 }
 
-@Suppress("FunctionName")
 internal open class Base: State() {
-
-    private class CollectionHolder(isObject: Boolean) {
-        var type: String
-        var objectCollection: MutableMap<String, Any>
-        var arrayCollection: MutableList<Any>
-        var reservedObjectKey = ""
-
-        init {
-            type = if (isObject) "object" else "array"
-            objectCollection = mutableMapOf()
-            arrayCollection = mutableListOf()
-        }
-
-        fun assignChildToObject(child: CollectionHolder) {
-            objectCollection[reservedObjectKey] = if (child.type == "object") child.objectCollection else child.arrayCollection
-        }
-
-        fun appendChildToArray(child: CollectionHolder) {
-            arrayCollection += if (child.type == "object") child.objectCollection else child.arrayCollection
-        }
-    }
-    
     companion object {
         private fun List<ByteArray>.joined(separator: ByteArray): ByteArray {
             var finalArray = byteArrayOf()
@@ -99,56 +89,32 @@ internal open class Base: State() {
             finalArray += this.last()
             return finalArray
         }
+
         fun fillTab(repeatCount: Int) : ByteArray {
             val array = ByteArray(repeatCount)
             array.fill(TAB)
             return  array
         }
-        internal fun serializeToBytes(node: Any?, index: Int, tabCount: Int, stringDelimiter: Byte) : ByteArray {
+
+        internal fun serializeToBytes(node: Any?, stringDelimiter: Byte) : ByteArray {
             when (node) {
                 is Map<*, *> -> {
                     val innerContent: List<ByteArray> = node.map {
                         byteArrayOf(stringDelimiter) +
                                 it.key.toString().toByteArray() +
-                                (if (tabCount != 0) byteArrayOf(stringDelimiter,
-                                    COLON,
-                                    TAB
-                                ) else byteArrayOf(
+                                byteArrayOf(
                                     stringDelimiter, COLON
-                                )) +
-                                serializeToBytes(it.value, index + 1, tabCount, stringDelimiter)
+                                ) +
+                                serializeToBytes(it.value, stringDelimiter)
                     }
 
-                    if (tabCount != 0 && innerContent.isNotEmpty()) {
-                        val spacer: ByteArray = fillTab((index + 1) * tabCount)
-                        val endSpacer: ByteArray = fillTab(index * tabCount)
-                        var data: ByteArray = byteArrayOf(OPEN_OBJECT, NEW_LINE)
-                        val separator: ByteArray = byteArrayOf(COMMA, NEW_LINE) + spacer
-                        data += spacer
-                        data += innerContent.joined(separator)
-                        data += NEW_LINE
-                        data += endSpacer
-                        data += CLOSE_OBJECT
-                        return data
-                    }
                     return (byteArrayOf(OPEN_OBJECT) + (innerContent.joined(byteArrayOf(
                         COMMA
                     )))) + byteArrayOf(CLOSE_OBJECT)
                 }
                 is List<*> -> {
-                    val innerContent = node.map { serializeToBytes(it, index + 1, tabCount, stringDelimiter) }
-                    if (tabCount != 0 && innerContent.isNotEmpty()) {
-                        val spacer: ByteArray = fillTab((index + 1) * tabCount)
-                        val endSpacer: ByteArray = fillTab(index * tabCount)
-                        var data: ByteArray = byteArrayOf(OPEN_ARRAY, NEW_LINE)
-                        val separator: ByteArray = byteArrayOf(COMMA, NEW_LINE) + spacer
-                        data += spacer
-                        data += innerContent.joined(separator)
-                        data += NEW_LINE
-                        data += endSpacer
-                        data += CLOSE_ARRAY
-                        return data
-                    }
+                    val innerContent = node.map { serializeToBytes(it, stringDelimiter) }
+
                     return (byteArrayOf(OPEN_ARRAY) + innerContent.joined(byteArrayOf(
                         COMMA
                     ))) + byteArrayOf(CLOSE_ARRAY)
@@ -163,6 +129,9 @@ internal open class Base: State() {
                 is Number -> {
                     return node.toString().toByteArray()
                 }
+                is JSONBlock -> {
+                    return node.base.jsonData
+                }
                 null -> {
                     return byteArrayOf(LETTER_N, 117, 108, 108)
                 }
@@ -174,25 +143,22 @@ internal open class Base: State() {
     }
 
     internal fun <T> getField(path: String?, fieldName: String, mapper: (ValueStore) -> T?, ignoreType: Boolean = false) : T? {
-        val (data, type) = if (path == null) ValueType(
-            ValueStore(
-                jsonText,
-                jsonData
-            ), contentType
-        ) else decodeData(path) ?: return null
-        if ((!ignoreType && type != fieldName) ||  (ignoreType && type != fieldName && type != "string")){
-            if(errorHandler != null) {
-                errorHandler?.invoke(
-                    ErrorInfo(
-                        ErrorCode.NonMatchingDataType,
-                        (path?.split(pathSplitter)?.size ?: 0) - 1,
-                        path ?: ""
-                    )
-                )
+        if (path != null) {
+            val result = decodeData(path, typeConstraint =  TypeConstraint(fieldName, ignoreType))
+            return if (result == null) null
+            else {
+                return mapper(result.value)
             }
-            return null
         }
-        return mapper(data)
+
+        if (TypeConstraint(fieldName, ignoreType).isTypeMatch(contentType)) {
+            return mapper(ValueStore(jsonText, jsonData))
+        }
+        if (errorHandler != null) {
+            errorHandler?.invoke(ErrorInfo(ErrorCode.NonMatchingDataType, -1, ""))
+            errorHandler = null
+        }
+        return null
     }
 
     internal fun prettifyContent(originalContent: ByteArray, tabSize: Int) : String {
@@ -202,17 +168,14 @@ internal open class Base: State() {
         var isEscaping = false
         var isQuotes = false
 
-        if (originalContent[1] == NEW_LINE) {
-            return originalContent.decodeToString() // already being pretty
-        }
-
-
         while (iterator.hasNext()) {
             val char = iterator.nextByte()
             if (!isEscaping && char == quotation) {
                 isQuotes = !isQuotes
             } else if (!isQuotes) {
-                if (char == OPEN_OBJECT || char == OPEN_ARRAY) {
+                if (char == TAB || char == NEW_LINE) {
+                    continue
+                } else if (char == OPEN_OBJECT || char == OPEN_ARRAY) {
                     if (iterator.hasNext()) {
                         val nextChar = iterator.nextByte()
                         if (nextChar == CLOSE_OBJECT || nextChar == CLOSE_ARRAY) {
@@ -250,7 +213,7 @@ internal open class Base: State() {
             }
             presentation += char
         }
-        return presentation.decodeToString()
+        return asString(presentation)
     }
 
     internal fun resolveValue(stringData: String, byteData: ByteArray, type: String) : Any {
@@ -274,13 +237,13 @@ internal open class Base: State() {
         inputPath: String,
         copyCollectionData: Boolean = false,
         grabAllPaths: Boolean = false,
-        multiCollectionTypeConstraint: JSONType? = null
+        typeConstraint: TypeConstraint = TypeConstraint()
     ) : ValueType? {
         val results = exploreData(
             inputPath,
             copyCollectionData,
             grabAllPaths,
-         multiCollectionTypeConstraint?.rawValue)
+            typeConstraint)
         errorInfo?.apply {
             errorHandler?.invoke(ErrorInfo(this.first, this.second, inputPath))
             errorHandler = null
@@ -296,7 +259,7 @@ internal open class Base: State() {
         inputPath: String,
         copyCollectionData: Boolean,
         grabAllPaths: Boolean,
-        multiCollectionTypeConstraint: String?
+        typeConstraint: TypeConstraint
     ) : ValueType? {
         errorInfo = null
         if (!(contentType == "object" || contentType == "array")) {
@@ -381,13 +344,17 @@ internal open class Base: State() {
 
                         if (processedPathIndex == (paths.size - 1)) {
                             val values = JSONBlockList()
-                            val result = iterateArrayRecursive(iterator, parsedIndex, notationBalance, values, searchDepth == 0, extractMode, multiCollectionTypeConstraint)
-                            if (result != null) {
+                            val result = iterateArrayRecursive(iterator, parsedIndex, notationBalance, values, searchDepth == 0, extractMode, typeConstraint)
+                            if (extractMode < 2) {
+                                if (result == null) {
+                                    if (restoreLastPointIfNeeded()) { continue }
+                                    errorInfo = Pair(ErrorCode.ArrayIndexNotFound, processedPathIndex)
+                                    return null
+                                }
                                 return result
                             }
-                            val isRestored = restoreLastPointIfNeeded()
                             if (values.data.isNotEmpty()) {
-                                if (!isRestored) {
+                                if (!restoreLastPointIfNeeded()) {
                                     return singleItemList(values.data[0])
                                 }
                                 commonPathCollections += values.data
@@ -445,6 +412,14 @@ internal open class Base: State() {
                         return null
                     }
                     continue
+                }
+            }
+            else {
+                // handling escape characters at the end ...
+                if (escapeCharacter) {
+                    escapeCharacter = false
+                } else if (char == ESCAPE) {
+                    escapeCharacter = true
                 }
             }
             // ======== FINISHED HANDING JSON OPEN AND CLOSE NOTATION ==========
@@ -523,17 +498,23 @@ internal open class Base: State() {
                         }
                         startSearchValue = true
                         if (processedPathIndex == paths.size) {
-                            if (!grabAllPaths) {
-                                return getNextElement(iterator, false)
-                            }
-                            val (value, type) = getNextElement(iterator, copyCollectionData)
+                            val capturedElement = getNextElement(iterator, copyCollectionData)
                             val isRestored = restoreLastPointIfNeeded()
-                            if (!(multiCollectionTypeConstraint == null || multiCollectionTypeConstraint != type))
-                                continue
-                            val elementToAdd: JSONBlock = if (value.isBytes) {
-                                JSONBlock(value.bytes, type, this)
+
+                            if (!grabAllPaths) {
+                                if (typeConstraint.isTypeMatch(capturedElement.type)) {
+                                    return capturedElement
+                                }
+                                if (isRestored) { continue }
+                                errorInfo = Pair(ErrorCode.ObjectKeyNotFound, processedPathIndex - 1)
+                                return null
+                            }
+                            if (!typeConstraint.isTypeMatch(capturedElement.type)) { continue }
+
+                            val elementToAdd: JSONBlock = if (capturedElement.value.isBytes) {
+                                JSONBlock(capturedElement.value.bytes, capturedElement.type, this)
                             } else {
-                                JSONBlock(value.string, type)
+                                JSONBlock(capturedElement.value.string, capturedElement.type)
                             }
                             if (!isRestored) {
                                 return singleItemList(elementToAdd)
@@ -543,115 +524,93 @@ internal open class Base: State() {
                     }
                 }
             }
-            // handling escape characters at the end ...
-            if (escapeCharacter) {
-                escapeCharacter = false
-            } else if (char == ESCAPE) {
-                escapeCharacter = true
-            }
         }
         errorInfo = Pair(ErrorCode.Other, processedPathIndex)
         return null
     }
 
+    private fun parseSingularValue(input: String): Any? {
+        if (input[0] == 't') {
+            return true
+        } else if (input[0] == 'f') {
+            return false
+        } else if (input[0] == 'n') {
+            return null
+        } else {
+            return input.toDoubleOrNull() ?: return "#INVALID_NUMERIC"
+        }
+    }
+
     // iterators..
 
-    internal fun getStructuredData(iterator: PeekIterator, firstCharacter: Byte) : ValueType {
-        val stack: MutableList<CollectionHolder> = mutableListOf()
-        var isInQuotes = false
+    private fun parseNextElement(iterator: PeekIterator, firstCharacter: Byte): Any {
+        var isEscaping = false
+        val objectValue: MutableMap<String, Any?> = mutableMapOf()
+        val arrayValue: MutableList<Any?> = mutableListOf()
         var grabbedKey = ""
-        var isGrabbingText = false
         var grabbedText = ""
-        var notationBalance = 1
-        var shouldProcessObjectValue = false
-        var escapeCharacter = false
-        stack += if (firstCharacter == OPEN_OBJECT) {
-            CollectionHolder(isObject = true)
-        } else {
-            CollectionHolder(isObject = false)
-        }
-
+        val isObject = firstCharacter == OPEN_OBJECT
+        var isKeyCaptured = false
+        var isInQuotes = false
         while (iterator.hasNext()) {
-            val char: Byte = iterator.nextByte()
-            if (!isInQuotes) {
-                if (char == OPEN_OBJECT || char == OPEN_ARRAY) {
-                    notationBalance += 1
-                    if (stack.last().type == "object") {
-                        stack.last().reservedObjectKey = grabbedKey
-                    }
-                    stack += CollectionHolder(isObject = char == OPEN_OBJECT)
-                    shouldProcessObjectValue = false
-                } else if (char == CLOSE_OBJECT || char == CLOSE_ARRAY) {
-                    notationBalance -= 1
-                    if (isGrabbingText) {
-                        if (stack.last().type == "object") {
-                            stack.last().objectCollection[grabbedKey] = parseSingularValue(trimSpace(grabbedText))
-                        } else {
-                            stack.last().arrayCollection += parseSingularValue(trimSpace(grabbedText))
-                        }
-                        isGrabbingText = false
-                    }
-                    if (notationBalance == 0) {
-                        return if (stack.first().type == "object") ValueType(
-                            ValueStore(
-                                parsedData = stack.last().objectCollection
-                            ), "object"
-                        ) else ValueType(
-                            ValueStore(parsedData = stack.last().arrayCollection),
-                            "array"
-                        )
-                    }
-                    shouldProcessObjectValue = false
-                    val child = stack.removeLast()
-                    if (stack.last().type == "object") {
-                        stack.last().assignChildToObject(child)
-                    } else {
-                        stack.last().appendChildToArray(child)
-                    }
-                } else if (char == COLON) {
-                    shouldProcessObjectValue = true
-                    grabbedKey = grabbedText
-                }  else if (!isGrabbingText && ((char in 48..57) || char == MINUS || char == LETTER_T || char == LETTER_F || char == LETTER_N)) {
-                    grabbedText = ""
-                    isGrabbingText = true
-                } else if (char == COMMA && isGrabbingText) {
-                    isGrabbingText = false
-                    if (stack.last().type == "object") {
-                        stack.last().objectCollection[grabbedKey] = parseSingularValue(trimSpace(grabbedText))
-                    } else {
-                        stack.last().arrayCollection += parseSingularValue(trimSpace(grabbedText))
-                    }
-                    shouldProcessObjectValue = false
-                }
-            }
-            if (!escapeCharacter && char == quotation) {
+            val char = iterator.nextByte()
+            if (!isEscaping && char == quotation) {
                 isInQuotes = !isInQuotes
-                isGrabbingText = isInQuotes
-                if (isGrabbingText) {
+                if (isInQuotes) {
+                    // inside a array no need to worry about keys...
                     grabbedText = ""
                 } else {
-                    if (stack.last().type == "object") {
-                        if (shouldProcessObjectValue) {
-                            stack.last().objectCollection[grabbedKey] = grabbedText
+                    if (isObject) {
+                        if (isKeyCaptured) {
+                            objectValue[grabbedKey] = grabbedText
+                            isKeyCaptured = false
+                        } else {
+                            grabbedKey = grabbedText
+                            isKeyCaptured = true
                         }
                     } else {
-                        stack.last().arrayCollection += grabbedText
+                        arrayValue += grabbedText
                     }
-                    shouldProcessObjectValue = false
                 }
-            } else if (isGrabbingText) {
+            } else if (isInQuotes) {
+                if (isEscaping) {
+                    isEscaping = false
+                } else if (char == ESCAPE) {
+                    isEscaping = true
+                }
                 grabbedText += char.toInt().toChar()
+            } else {
+                if (char == OPEN_OBJECT || char == OPEN_ARRAY) {
+                    if (isObject) {
+                        objectValue[grabbedKey] = parseNextElement(iterator, char)
+                        isKeyCaptured = false
+                    } else {
+                        arrayValue.add(parseNextElement(iterator, char))
+                    }
+                } else if (char == CLOSE_OBJECT || char == CLOSE_ARRAY ){
+                    if (isObject) { return objectValue }
+                    return arrayValue
+                } else {
+                    val value = getPrimitive(iterator, char)?.second ?: continue
+                    if (isObject) {
+                        objectValue[grabbedKey] = parseSingularValue(value)
+                        isKeyCaptured = false
+                    } else {
+                        arrayValue.add(parseSingularValue(value))
+                    }
+                }
             }
-            if (escapeCharacter) {
-                escapeCharacter = false
-            } else if (char == ESCAPE) {
-                escapeCharacter = true
-            }
+
         }
+        return "#INVALID_TYPE"
+    }
+
+    internal fun getStructuredData(iterator: PeekIterator, firstCharacter: Byte): ValueType{
+        val dataType = if (firstCharacter == OPEN_OBJECT) "object" else "array"
         return ValueType(
-            ValueStore(parsedData = byteArrayOf()),
-            if (firstCharacter == OPEN_OBJECT) "object" else "array"
-        )
+                ValueStore(
+                parseNextElement(iterator, firstCharacter)
+        ), dataType)
     }
 
     private fun iterateArrayWrite(iterator: PeekIterator, elementIndex: Int, copyingData: ByteWrapper) : Boolean {
@@ -661,7 +620,8 @@ internal open class Base: State() {
         var cursorIndex = 0
         copyingData += OPEN_ARRAY
         if (elementIndex == 0) {
-            return true
+            val nextChar = iterator.peek() ?: return false
+            return nextChar != CLOSE_ARRAY
         }
 
         while (iterator.hasNext()) {
@@ -696,66 +656,44 @@ internal open class Base: State() {
     }
 
     private fun addData(
-        notationBalance: Int,
         isInObject: Boolean,
-        dataToAdd: Any?,
+        data: ByteArray,
         copiedBytes: ByteWrapper,
-        tabUnitCount: Int,
         paths: List<ByteArray>,
         isIntermediateAdd: Boolean = false,
-        isFirstValue: Boolean = false
     ) : Pair<ErrorCode, Int>? {
         if (!isIntermediateAdd) {
             copiedBytes.dropLast()
-            if (!isLastCharacterOpenNode(copiedBytes)) {
-                copiedBytes += 44
+            if (!(copiedBytes.last() == OPEN_OBJECT || copiedBytes.last() == OPEN_ARRAY)) {
+                copiedBytes += COMMA
             }
         }
-        if (tabUnitCount != 0 && !isFirstValue) {
-            copiedBytes += NEW_LINE
-            copiedBytes += fillTab(notationBalance * tabUnitCount)
-        }
+
         if (isInObject) {
             copiedBytes += quotation
             copiedBytes += paths[paths.size - 1]
-            val endKeyPhrase: ByteArray = if (tabUnitCount == 0) byteArrayOf(quotation,
-                COLON
-            ) else byteArrayOf(quotation, COLON, TAB)
-            copiedBytes += endKeyPhrase
+            copiedBytes += byteArrayOf(quotation, COLON)
         }
-        var bytesToAdd =
-            serializeToBytes(dataToAdd, notationBalance, tabUnitCount, quotation)
-        if (!isIntermediateAdd) {
-            if (tabUnitCount != 0) {
-                bytesToAdd += NEW_LINE
-                bytesToAdd += fillTab((notationBalance - 1) * tabUnitCount)
-            }
-            bytesToAdd += if (isInObject) CLOSE_OBJECT else CLOSE_ARRAY
-        } else {
-            bytesToAdd += COMMA
-            if (tabUnitCount != 0 && isFirstValue) {
-                bytesToAdd += NEW_LINE
-                bytesToAdd += fillTab(notationBalance * tabUnitCount)
-            }
-        }
-        copiedBytes += bytesToAdd
+
+        copiedBytes += data
+        copiedBytes += if (isIntermediateAdd) COMMA
+        else if (isInObject) CLOSE_OBJECT else CLOSE_ARRAY
         return null
     }
 
-    internal fun write(inputPath: String, data:Any?, writeMode: UpdateMode, isMultiple: Boolean) {
+    internal fun handleWrite(path: String, data: Any?, mode: UpdateMode, multiple: Boolean) {
+        write(path, serializeToBytes(data, quotation), mode, multiple)
+        errorInfo?.apply {
+            errorHandler?.invoke(ErrorInfo(this.first, this.second, path))
+            errorHandler = null
+        }
+    }
+
+    private fun write(inputPath: String, data:ByteArray, writeMode: UpdateMode, isMultiple: Boolean) {
         errorInfo = null
         if (!(contentType == "object" || contentType == "array")) {
             errorInfo = Pair(ErrorCode.NonNestableRootType, 0)
             return
-        }
-
-        var tabUnitCount = 0
-        if (jsonData[1] == NEW_LINE) {
-            while ((tabUnitCount + 2) < jsonData.size) {
-                if (jsonData[tabUnitCount + 2] == TAB) {
-                    tabUnitCount += 1
-                } else { break }
-            }
         }
 
         val (paths, lightMatch, arrayIndexes, searchDepths) = splitPath(inputPath)
@@ -808,9 +746,18 @@ internal open class Base: State() {
         val iterator = PeekIterator(jsonData)
 
         fun finishWriting() {
-            while (iterator.hasNext()) {
-                val char = iterator.nextByte()
+            val char = iterator.nextByte()
+            if (isInQuotes || char > TAB) {
                 copiedBytes += char
+            }
+            if (!escapeCharacter && char == quotation) {
+                isInQuotes = !isInQuotes
+            } else if (isInQuotes) {
+                if (escapeCharacter) {
+                    escapeCharacter = false
+                } else if( char == ESCAPE) {
+                    escapeCharacter = true
+                }
             }
 
             jsonData = copiedBytes.bytes
@@ -837,6 +784,7 @@ internal open class Base: State() {
 
         while (iterator.hasNext()) {
             val char = iterator.nextByte()
+            if (isInQuotes || char > TAB)
             copiedBytes += char
             // if within quotation ignore processing json literals...
             if (!isInQuotes) {
@@ -856,7 +804,7 @@ internal open class Base: State() {
                         }
 
                         if ((processedPathIndex + 1) == paths.size) {
-                            if (iterateArrayWriteRecursive(iterator, parsedIndex, copiedBytes, notationBalance, searchDepth == 0, data, writeMode, isMultiple, tabUnitCount)) {
+                            if (iterateArrayWriteRecursive(iterator, parsedIndex, copiedBytes, notationBalance, searchDepth == 0, data, writeMode, isMultiple)) {
                                 if (!restoreLastPointIfNeeded(isMultiple)) {
                                     finishWriting()
                                     return
@@ -880,16 +828,16 @@ internal open class Base: State() {
                     continue
                 }
 
-                if (char ==  CLOSE_OBJECT || char ==  CLOSE_ARRAY) {
+                if (char == CLOSE_OBJECT || char == CLOSE_ARRAY) {
                     notationBalance -= 1
                     // section responsible for adding attribute at the end of the object if the attribute is not found
-                    if ((searchDepth == 0 || notationBalance == advancedOffset) && char ==  CLOSE_OBJECT && (processedPathIndex + 1) == paths.size && (writeMode == UpdateMode.Upsert || writeMode == UpdateMode.OnlyInsert)) {
+                    if ((searchDepth == 0 || notationBalance == advancedOffset) && char == CLOSE_OBJECT && (processedPathIndex + 1) == paths.size && (writeMode == UpdateMode.Upsert || writeMode == UpdateMode.OnlyInsert)) {
                         if (isObjectAttributeFound) {
                             isObjectAttributeFound = false
                         } else {
                             // make sure the the last attribute is an object attribute and not an array index
                             if (arrayIndexes[arrayIndexes.size - 1] == null) {
-                                addData(notationBalance + 1, true, data, copiedBytes, tabUnitCount, paths)
+                                addData(true, data, copiedBytes, paths)
                                 if (!restoreLastPointIfNeeded(isMultiple)) {
                                     finishWriting()
                                     return
@@ -1011,7 +959,7 @@ internal open class Base: State() {
                         // section responsible to when last attribute is found
                         if(processedPathIndex == paths.size) {
                             if (writeMode == UpdateMode.Delete) {
-                                deleteData(iterator, copiedBytes, tabUnitCount, notationBalance)
+                                deleteData(iterator, copiedBytes, notationBalance)
                                 if (restoreLastPointIfNeeded(isMultiple)) { continue } else {
                                     finishWriting()
                                     return
@@ -1024,8 +972,8 @@ internal open class Base: State() {
                                 errorInfo = Pair(ErrorCode.ObjectKeyAlreadyExists, processedPathIndex - 1)
                                 return
                             } else {
-                                val bytesToAdd = serializeToBytes(data, notationBalance, tabUnitCount, quotation)
-                                replaceData(iterator, bytesToAdd, copiedBytes)
+
+                                replaceData(iterator, data, copiedBytes)
                                 if (writeMode == UpdateMode.Upsert) {
                                     isObjectAttributeFound = true
                                 }
@@ -1056,18 +1004,8 @@ internal open class Base: State() {
         var isQuotes = false
         var cursorIndex = 0
         if (elementIndex == 0) {
-
-            while (iterator.hasNext()) {
-                val char = iterator.nextByte()
-                if (!(char == NEW_LINE || char == TAB)) {
-                    iterator.moveBack()
-                    if (char == CLOSE_ARRAY) {
-                        return false
-                    }
-                    return true
-                }
-            }
-            return false
+            val nextChar = iterator.peek() ?: return false
+            return nextChar != CLOSE_ARRAY
         }
 
         while (iterator.hasNext()) {
@@ -1100,6 +1038,45 @@ internal open class Base: State() {
         return false
     }
 
+    internal fun getKeys(): Array<String>? {
+        if (contentType != "object") {
+            errorHandler?.invoke(ErrorInfo(ErrorCode.CannotFindObjectKeys, -1, ""))
+            errorHandler = null
+            return null
+        }
+
+        var isInQuotes = false
+        var isEscaped = false
+        var grabbedBytes: ByteArray = byteArrayOf()
+        var notationBalance = 0
+        var keys: Array<String> = arrayOf()
+
+        for (char in jsonData) {
+            if (!isEscaped && char == quotation) {
+                isInQuotes = !isInQuotes
+                if (isInQuotes && notationBalance == 1) {
+                    grabbedBytes = byteArrayOf()
+                }
+            } else if (isInQuotes)  {
+                if (isEscaped) {
+                    isEscaped = false
+                } else if (char == ESCAPE) {
+                    isEscaped = true
+                }
+                if (notationBalance == 1) {
+                    grabbedBytes += char
+                }
+            } else if (char == OPEN_OBJECT || char == OPEN_ARRAY) {
+                notationBalance += 1
+            } else if (char == CLOSE_OBJECT || char == CLOSE_ARRAY) {
+                notationBalance -= 1
+            } else if (char == COLON && notationBalance == 1) {
+                keys += grabbedBytes.decodeToString()
+            }
+        }
+        return keys
+    }
+
     private fun getNextElement(iterator: PeekIterator, isCopyCollection: Boolean): ValueType {
         var text = ""
         val data = ByteWrapper()
@@ -1123,9 +1100,9 @@ internal open class Base: State() {
                 if(extractInnerContent) return getStructuredData(iterator, char)
                 if (isCopyCollection) {
                     return if (char == OPEN_OBJECT) {
-                        ValueType(ValueStore(childData = getObjectEntries(iterator)), "CODE_COLLECTION")
+                        ValueType(ValueStore(childData =  JSONCollection(getObjectEntries(iterator), false)), "CODE_COLLECTION")
                     } else {
-                        ValueType(ValueStore(childData = getArrayValues(iterator)), "CODE_COLLECTION")
+                        ValueType(ValueStore(childData = JSONCollection(getArrayValues(iterator), true)), "CODE_COLLECTION")
                     }
                 }
                 data += char
@@ -1138,7 +1115,7 @@ internal open class Base: State() {
                 }
             }
         }
-        return ValueType(ValueStore("not data to retrieve"), "string")
+        return ValueType(ValueStore("no data to retrieve"), "string")
     }
 
     data class JSONBlockList(@Suppress("ArrayInDataClass") var data: Array<JSONBlock> = arrayOf()) {
@@ -1147,7 +1124,7 @@ internal open class Base: State() {
         }
     }
 
-    private fun iterateArrayRecursive(iterator: PeekIterator, elementIndex: Int, initialNotationBalance: Int, values: JSONBlockList, shouldRecurse: Boolean, mode: Int, typeConstraint: String?): ValueType? {
+    private fun iterateArrayRecursive(iterator: PeekIterator, elementIndex: Int, initialNotationBalance: Int, values: JSONBlockList, shouldRecurse: Boolean, mode: Int, typeConstraint: TypeConstraint): ValueType? {
         var notationBalance = initialNotationBalance
         val stopBalance = initialNotationBalance - 1
         var escapeCharacter = false
@@ -1156,27 +1133,23 @@ internal open class Base: State() {
         var innerItem: ValueType?
 
         if (elementIndex == 0) {
-            while (iterator.hasNext()) {
-                val char = iterator.nextByte()
-
-                if (!(char == NEW_LINE || char == TAB)) {
-                    iterator.moveBack()
-                    if (char == CLOSE_ARRAY) {
-                        return null
-                    }
-                    val result = getNextElement(iterator, mode == 1)
-                    if (mode < 2) return result
-                    if (typeConstraint == null || typeConstraint == result.type) {
-                        values += if (result.value.isBytes) {
-                            JSONBlock(result.value.bytes, result.type, this)
-                        } else {
-                            JSONBlock(result.value.string, result.type)
-                        }
-                        return null
-                    }
-                }
+            val nextChar = iterator.peek() ?: return null
+            if (nextChar == CLOSE_ARRAY) {
+                return null
             }
-            return null
+            val result = getNextElement(iterator, mode == 1)
+            if (mode < 2) {
+                if (typeConstraint.isTypeMatch(result.type)) { return result }
+                return null
+            }
+            if (typeConstraint.isTypeMatch(result.type)) {
+                values += if (result.value.isBytes) {
+                    JSONBlock(result.value.bytes, result.type, this)
+                } else {
+                    JSONBlock(result.value.string, result.type)
+                }
+                return null
+            }
         }
 
         while (iterator.hasNext()) {
@@ -1188,7 +1161,7 @@ internal open class Base: State() {
                 if (char == OPEN_OBJECT || char == OPEN_ARRAY) {
                     notationBalance += 1
                     if (char == OPEN_ARRAY && shouldRecurse) {
-                        innerItem = iterateArrayRecursive(iterator, elementIndex, initialNotationBalance, values, true, mode, typeConstraint)
+                        innerItem = iterateArrayRecursive(iterator, elementIndex, notationBalance, values, true, mode, typeConstraint)
                         // if innerItem is null then it means this is a multiple data read
                         if (innerItem != null) {
                             return innerItem
@@ -1204,8 +1177,11 @@ internal open class Base: State() {
                     cursorIndex += 1
                     if (cursorIndex == elementIndex) {
                         val result = getNextElement(iterator, mode == 1)
-                        if (mode < 2) return result
-                        if (typeConstraint == null || typeConstraint == result.type) {
+                        if (mode < 2) {
+                            if (typeConstraint.isTypeMatch(result.type)) { return result }
+                            return null
+                        }
+                        if (typeConstraint.isTypeMatch(result.type)) {
                             values += if (result.value.isBytes) {
                                 JSONBlock(result.value.bytes, result.type, this)
                             } else {
@@ -1226,7 +1202,7 @@ internal open class Base: State() {
         return null
     }
     
-    private fun iterateArrayWriteRecursive(iterator: PeekIterator, elementIndex: Int, copyingData: ByteWrapper, initialNotationBalance: Int, shouldRecurse: Boolean, dataToAdd: Any?, updateMode: UpdateMode, isMultiple: Boolean, tabUnitCount: Int): Boolean {
+    private fun iterateArrayWriteRecursive(iterator: PeekIterator, elementIndex: Int, copyingData: ByteWrapper, initialNotationBalance: Int, shouldRecurse: Boolean, data: ByteArray, updateMode: UpdateMode, isMultiple: Boolean): Boolean {
         var notationBalance = initialNotationBalance
         val stopBalance = initialNotationBalance - 1
         var escapeCharacter = false
@@ -1235,38 +1211,29 @@ internal open class Base: State() {
         var didProcessed = false
 
         if (elementIndex == 0) {
-            while (iterator.hasNext()) {
-                val char = iterator.nextByte()
-
-                if (!(char == NEW_LINE || char == TAB)) {
-                    iterator.moveBack()
-                    if (char == CLOSE_ARRAY) {
-                        copyingData += char
-                        if (updateMode == UpdateMode.OnlyInsert || updateMode == UpdateMode.Upsert) {
-                            addData(notationBalance, false, dataToAdd, copyingData, tabUnitCount, mutableListOf())
-                            copyingData.dropLast()
-                            return true
-                        }
-                        copyingData.dropLast()
-                        return false
-                    }
-                    when (updateMode) {
-                        UpdateMode.Delete -> {
-                            deleteData(iterator, copyingData, tabUnitCount, notationBalance)
-                        }
-                        UpdateMode.OnlyInsert -> {
-                            addData(notationBalance, false, dataToAdd, copyingData, tabUnitCount, mutableListOf(), isIntermediateAdd = true, isFirstValue = true)
-                        }
-                        else -> {
-                            val replacingData = serializeToBytes(dataToAdd, notationBalance, tabUnitCount, quotation)
-                            replaceData(iterator, replacingData, copyingData)
-                        }
-                    }
+            val char = iterator.peek() ?: return false
+            if (char == CLOSE_ARRAY) {
+                copyingData += char
+                if (updateMode == UpdateMode.OnlyInsert || updateMode == UpdateMode.Upsert) {
+                    addData(false, data, copyingData, mutableListOf())
+                    copyingData.dropLast()
                     return true
                 }
-                copyingData += char
+                copyingData.dropLast()
+                return false
             }
-            return false
+            when (updateMode) {
+                UpdateMode.Delete -> {
+                    deleteData(iterator, copyingData, notationBalance)
+                }
+                UpdateMode.OnlyInsert -> {
+                    addData(false, data, copyingData, mutableListOf(), isIntermediateAdd = true)
+                }
+                else -> {
+                    replaceData(iterator, data, copyingData)
+                }
+            }
+            return true
         }
 
         while (iterator.hasNext()) {
@@ -1279,7 +1246,7 @@ internal open class Base: State() {
                 if (char == OPEN_OBJECT || char == OPEN_ARRAY) {
                     notationBalance += 1
                     if (char == OPEN_ARRAY && shouldRecurse) {
-                        didProcessed = iterateArrayWriteRecursive(iterator, elementIndex, copyingData, notationBalance, true, dataToAdd, updateMode, isMultiple, tabUnitCount)
+                        didProcessed = iterateArrayWriteRecursive(iterator, elementIndex, copyingData, notationBalance, true, data, updateMode, isMultiple)
                         if (!isMultiple && didProcessed) {
                             return true
                         }
@@ -1289,7 +1256,7 @@ internal open class Base: State() {
                     if (notationBalance == stopBalance) {
                         iterator.moveBack()
                         if (updateMode == UpdateMode.OnlyInsert || updateMode == UpdateMode.Upsert) {
-                            addData(notationBalance + 1, false, dataToAdd, copyingData, tabUnitCount, mutableListOf())
+                            addData(false, data, copyingData, mutableListOf())
                             copyingData.dropLast()
                             return true
                         }
@@ -1301,14 +1268,13 @@ internal open class Base: State() {
                     if (cursorIndex == elementIndex) {
                         when (updateMode) {
                             UpdateMode.Delete -> {
-                                deleteData(iterator, copyingData, tabUnitCount, notationBalance)
+                                deleteData(iterator, copyingData, notationBalance)
                             }
                             UpdateMode.OnlyInsert -> {
-                                addData(notationBalance, false, dataToAdd, copyingData, tabUnitCount, mutableListOf(), isIntermediateAdd = true)
+                                addData(false, data, copyingData, mutableListOf(), true)
                             }
                             else -> {
-                                val replacingData = serializeToBytes(dataToAdd, notationBalance, tabUnitCount, quotation)
-                                replaceData(iterator, replacingData, copyingData)
+                                replaceData(iterator, data, copyingData)
                             }
                         }
                         return true
@@ -1359,8 +1325,8 @@ internal open class Base: State() {
         }
     }
 
-    private fun getObjectEntries(iterator: PeekIterator) : Array<JSONChild> {
-        var values: Array<JSONChild> = arrayOf()
+    private fun getObjectEntries(iterator: PeekIterator) : List<JSONChild> {
+        val values: MutableList<JSONChild> = mutableListOf()
         var bytes: ByteWrapper
         var text = ""
         var dataType: String
@@ -1415,8 +1381,8 @@ internal open class Base: State() {
         return values
     }
 
-    private fun getArrayValues(iterator: PeekIterator) : Array<JSONChild> {
-        var values: Array<JSONChild> = arrayOf()
+    private fun getArrayValues(iterator: PeekIterator) : List<JSONChild> {
+        val values: MutableList<JSONChild> = mutableListOf()
         var bytes: ByteWrapper
         var text = ""
         var dataType: String
@@ -1462,18 +1428,7 @@ internal open class Base: State() {
         return values
     }
 
-    private fun isLastCharacterOpenNode(data: ByteWrapper) : Boolean {
-        while (true) {
-            if (data.last() == NEW_LINE || data.last() == TAB) {
-                data.dropLast()
-            } else {
-                val last = data.last()
-                return last == OPEN_OBJECT || last == OPEN_ARRAY
-            }
-        }
-    }
-
-    private fun replaceData(iterator: PeekIterator, dataToAdd: ByteArray, copiedBytes: ByteWrapper) {
+    private fun replaceData(iterator: PeekIterator, data: ByteArray, copiedBytes: ByteWrapper) {
 
         // 0 - object/array, string - 1, others - 3
         var notationBalance = 0
@@ -1497,7 +1452,8 @@ internal open class Base: State() {
                 type = 3
                 break
             }
-            copiedBytes += char
+            if (char > TAB)
+                copiedBytes += char
         }
 
         if (type == 1 || type == 2) {
@@ -1506,7 +1462,7 @@ internal open class Base: State() {
                 if (isInQuotes) {
                     if (!isEscaping && char == quotation) {
                         if (type == 2) {
-                            copiedBytes += dataToAdd
+                            copiedBytes += data
                             return
                         }
                         isInQuotes = false
@@ -1522,7 +1478,7 @@ internal open class Base: State() {
                     } else if (char == CLOSE_OBJECT || char == CLOSE_ARRAY) {
                         notationBalance -= 1
                         if (notationBalance == 0) {
-                            copiedBytes += dataToAdd
+                            copiedBytes += data
                             return
                         }
                     } else if (char == quotation) {
@@ -1535,7 +1491,7 @@ internal open class Base: State() {
             while (iterator.hasNext()) {
                 val char = iterator.nextByte()
                 if (!(isNumber(char) || (char in 97..122))) {
-                    copiedBytes += dataToAdd
+                    copiedBytes += data
                     iterator.moveBack()
                     return
                 }
@@ -1547,7 +1503,7 @@ internal open class Base: State() {
         return (char in 48..57) || char == DECIMAL || char == MINUS
     }
 
-    private fun deleteData(iterator: PeekIterator, copiedData: ByteWrapper, tabUnitCount: Int, prevNotationBalance: Int) {
+    private fun deleteData(iterator: PeekIterator, copiedData: ByteWrapper, prevNotationBalance: Int) {
         var didRemovedFirstComma = false
         var isInQuotes = false
         var notationBalance = prevNotationBalance
@@ -1588,12 +1544,6 @@ internal open class Base: State() {
                 } else if (char == CLOSE_OBJECT || char == CLOSE_ARRAY) {
                     notationBalance -= 1
                     if (notationBalance == (prevNotationBalance - 1)) {
-                        if (tabUnitCount != 0) {
-                            if (didRemovedFirstComma) {
-                                copiedData += NEW_LINE
-                                copiedData += fillTab((prevNotationBalance - 1) * tabUnitCount)
-                            }
-                        }
                         iterator.moveBack()
                         return
                     }
@@ -1730,18 +1680,6 @@ internal open class Base: State() {
         return SplitPathData(paths, lightMatch, arrayIndexes, searchDepths)
     }
 
-    private fun parseSingularValue(input: String) : Any {
-        return if (input.first() == 't') {
-            true
-        } else if (input.first() == 'f') {
-            false
-        } else if (input.first() == 'n') {
-            Constants.NULL
-        } else {
-            input.toDoubleOrNull() ?: "#INVALID_NUMBER"
-        }
-    }
-
     private fun getPrimitive(iterator: PeekIterator, firstCharacter: Byte) : Pair<String, String>? {
         if (firstCharacter == LETTER_T) {
             return Pair("boolean", "true")
@@ -1783,11 +1721,4 @@ internal open class Base: State() {
         return false
     }
 
-    private fun trimSpace(input: String) : String {
-        var newString = input
-        while ((newString.last().isWhitespace())) {
-            newString = newString.dropLast(1)
-        }
-        return newString
-    }
 }
