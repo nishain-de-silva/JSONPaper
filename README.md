@@ -1,4 +1,4 @@
-# JSONPond (v2.9) :rocket:
+# JSONPond (v3) :rocket:
 ![](https://img.shields.io/badge/Support-Swift-f16430)
 ![](https://img.shields.io/badge/install-Swift_Package_Manager-f16430)
 ![](https://img.shields.io/badge/Support-Kotlin-6b6dd7)
@@ -23,7 +23,7 @@ Gradle script
 
 ```groovy
 dependencies    {
-    implmementation("io.github.nishain-de-silva:jsonpond:2.9.0")
+    implmementation("io.github.nishain-de-silva:jsonpond:3.0.0")
 }
 
 ```
@@ -239,14 +239,14 @@ if type == .string {
 
 ```
 
-type  | output
---- | ---
-.string | string
-.number | double
-.boolean | `true` or `false`
-.object | JSONBlock
-.array | [JSONBlock]
-.null | `JSONPond.Constants.NULL`
+| type     | output                     |
+|----------|----------------------------|
+| .string  | string                     |
+ | .number  | double                     |
+ | .boolean | `true` or `false`          |
+ | .object  | JSONBlock                  |
+ | .array   | [JSONBlock]                |
+ | .null    | `JSONPond.Constants.NULL`  |
 
 you could additionally use `type()` to get the data type of the current JSON `reference`.
 
