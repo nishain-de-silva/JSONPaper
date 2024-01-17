@@ -29,6 +29,19 @@ internal struct PeekIterator {
     }
     
     @inlinable
+    mutating func peek() -> UInt8? {
+        while base < end {
+            base += 1
+            let value = base.load(as: TYPE)
+            if value > 32 {
+                base -= 1
+                return value
+            }
+        }
+        return nil
+    }
+    
+    @inlinable
     func hasNext() -> Bool {
         return base < end
     }

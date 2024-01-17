@@ -23,6 +23,71 @@ data class ErrorInfo(val errorCode: ErrorCode, val failedIndex: Int, val path: S
     }
 }
 
+class JSONCollection(
+    private val data: List<JSONChild>,
+    private val isArrayContent: Boolean,
+    override val size: Int = data.size
+) : List<JSONChild> {
+
+    internal constructor(): this(listOf(), false)
+
+    override fun contains(element: JSONChild): Boolean {
+        return data.contains(element)
+    }
+
+    /**
+     Check if this collection is an array type.
+     */
+    fun isArray(): Boolean = isArrayContent
+    
+    /**
+     Get keys of each item in key if items are extracted from object.
+     */
+    fun keys(): List<String> {
+        val mapped: MutableList<String> = mutableListOf()
+        for(value in data) {
+            mapped += value.key
+        }
+        return mapped
+    }
+
+    override fun containsAll(elements: Collection<JSONChild>): Boolean {
+        return data.containsAll(elements)
+    }
+
+    override fun get(index: Int): JSONChild {
+        return data[index]
+    }
+
+    override fun indexOf(element: JSONChild): Int {
+        return data.indexOf(element)
+    }
+
+    override fun isEmpty(): Boolean {
+        return data.isEmpty()
+    }
+
+    override fun iterator(): Iterator<JSONChild> {
+        return data.iterator()
+    }
+
+    override fun lastIndexOf(element: JSONChild): Int {
+        return data.lastIndexOf(element)
+    }
+
+    override fun listIterator(): ListIterator<JSONChild> {
+        return data.listIterator()
+    }
+
+    override fun listIterator(index: Int): ListIterator<JSONChild> {
+        return data.listIterator(index)
+    }
+
+    override fun subList(fromIndex: Int, toIndex: Int): List<JSONChild> {
+        return data.subList(fromIndex, toIndex)
+    }
+}
+
 class JSONChild: JSONBlock {
     internal constructor(parent: Base, data: String, type: String): super(data, type, parent)
     internal constructor(parent: Base, data: ByteArray, type: String): super(data, type, parent)
@@ -41,6 +106,13 @@ class JSONChild: JSONBlock {
         return this
     }
 
+    /**
+     Check if this instance is an array child.
+     */
+    fun isArrayItem(): Boolean {
+        return index > -1
+    }
+
     internal fun setIndex(newIndex: Int) : JSONChild {
         index = newIndex
         return this
@@ -48,16 +120,17 @@ class JSONChild: JSONBlock {
 }
 
 enum class ErrorCode (val rawValue: String) {
-    ObjectKeyNotFound("cannot find object attribute"),
-    ArrayIndexNotFound("cannot find given index within array bounds"),
+    ObjectKeyNotFound("cannot find object attribute that matches of required data type"),
+    ArrayIndexNotFound("cannot find given index within array bounds or data type of element does not match"),
     InvalidArrayIndex("array index is not a integer number"),
     ObjectKeyAlreadyExists("cannot insert because object attribute already exists"),
-    NonMatchingDataType("the data type of value of the value does not match with expected data type that is required from query method"),
+    NonMatchingDataType("the data type of the value does not match with expected data type that is required from query method"),
     NonNestableRootType("root data type is neither array or object and cannot transverse"),
     NonNestedParent("intermediate parent is a leaf node and non-nested. Cannot transverse further"),
-    EmptyQueryPath("query path cannot be empty at this query usage"),
+    EmptyQueryPath("query path cannot be empty"),
     CaptureUnknownElement("the path cannot be end with a intermediate represented token"),
     CannotFindElement("unable to find any element that matches the given path pattern"),
+    CannotFindObjectKeys("instance is not an object type therefore cannot find any keys"),
     Other("something went wrong. Target element cannot be found");
 
     companion object {
@@ -71,7 +144,7 @@ enum class ErrorCode (val rawValue: String) {
 }
 
 open class JSONBlock {
-    private val base: Base = Base()
+    internal val base: Base = Base()
 
     companion object {
         private const val INVALID_START_CHARACTER_ERROR = "[JSONPond] the first character of given json content is neither starts with '{' or '['. Make sure the given content is valid JSON"
@@ -79,8 +152,8 @@ open class JSONBlock {
         /**
             write JSON content from scratch recursively. use mapOf and listOf() to write object and array content respectively.
          */
-        fun write(jsonData: Any, prettify: Boolean = true) : JSONBlock {
-            val generatedBytes = Base.serializeToBytes(jsonData, 0, if (prettify) 4 else 0, 34)
+        fun write(jsonData: Any) : JSONBlock {
+            val generatedBytes = Base.serializeToBytes(jsonData, 34)
             if (generatedBytes[0] == 34.toByte()) {
                 return JSONBlock(generatedBytes, "string")
             }
@@ -156,7 +229,7 @@ open class JSONBlock {
     */
     fun setIntermediateGroupToken(representer: String) : JSONBlock {
         if (representer.toIntOrNull() != null) {
-            println("[JSONPond] intermediate represent strictly cannot be a number!")
+            println("[JSONPond] intermediate represent cannot be a number!")
             return this
         }
         base.intermediateSymbol = representer.toByteArray()
@@ -193,6 +266,13 @@ open class JSONBlock {
     }
 
     /**
+        Get keys of the current instance only if the current instance is an object type .
+     */
+    fun keys(): Array<String>? {
+        return base.getKeys()
+    }
+
+    /**
         Get JSON object in the given path. Activate ignoreType to parse JSON representable string if possible.
      */
     fun objectEntry(path: String? = null, ignoreType: Boolean = false) : JSONBlock? {
@@ -225,21 +305,10 @@ open class JSONBlock {
     /**
         Get collection of items either from array or object. Gives array of [JSONChild] which each has property index and key which either has a value based on parent is a object or an array.
      */
-    fun collection(path: String? = null, ignoreType: Boolean = false) : Array<JSONChild>? {
-        val data = base.decodeData(path ?: "", copyCollectionData = true) ?: return null
+    fun collection(path: String? = null, ignoreType: Boolean = false) : JSONCollection? {
+        val data = base.decodeData(path ?: "", copyCollectionData = true, typeConstraint = TypeConstraint("CODE_COLLECTION", canStringParse = ignoreType)) ?: return null
         if(ignoreType && data.type == "string") {
             return JSONBlock(data.value.string).collection()
-        }
-        if(data.type != "CODE_COLLECTION") {
-            if(base.errorHandler != null) {
-                base.errorHandler?.invoke(
-                    ErrorInfo(ErrorCode.NonMatchingDataType,
-                        (path?.split(base.pathSplitter)?.size ?: 0) -1,
-                        path ?: ""
-                    )
-                )
-            }
-            return null
         }
         return data.value.children
     }
@@ -276,9 +345,17 @@ open class JSONBlock {
     fun all(path: String, typeOf: JSONType? = null): Array<JSONBlock> {
         return base.decodeData(
             path,
-            grabAllPaths =  true,
-            multiCollectionTypeConstraint = typeOf
+            false,
+            true,
+            TypeConstraint(typeOf?.rawValue, false)
+
         )?.value?.array ?: arrayOf()
+    }
+
+    /** Get the data type of the value matches the given path. */
+    fun type(path: String): JSONType? {
+        val type = base.decodeData(path)?.type ?: return null
+        return JSONType(type)
     }
 
     /** Get the data type of the value held by the content of this node. */
@@ -295,43 +372,27 @@ open class JSONBlock {
     }
 
     /** Update the given given query path.*/
-        fun replace(path: String, data: Any, multiple: Boolean = false) : JSONBlock {
-        base.write(path, data, UpdateMode.OnlyUpdate, multiple)
-        base.errorInfo?.apply {
-            base.errorHandler?.invoke(ErrorInfo(this.first, this.second, path))
-            base.errorHandler = null
-        }
+    fun replace(path: String, data: Any, multiple: Boolean = false) : JSONBlock {
+        base.handleWrite(path, data, UpdateMode.OnlyUpdate, multiple)
         return this
     }
 
     /** Insert an element to the given query path. Last segment of the path should address to attribute name / array index to insert on objects / arrays.
      */
     fun insert(path: String, data: Any, multiple: Boolean = false) : JSONBlock {
-        base.write(path, data, UpdateMode.OnlyInsert, multiple)
-        base.errorInfo?.apply {
-            base.errorHandler?.invoke(ErrorInfo(this.first, this.second, path))
-            base.errorHandler = null
-        }
+        base.handleWrite(path, data, UpdateMode.OnlyInsert, multiple)
         return this
     }
 
     /** Update or insert data to node of the given query path.*/
     fun upsert(path: String, data: Any, multiple: Boolean = false) : JSONBlock {
-        base.write(path, data, UpdateMode.Upsert, multiple)
-        base.errorInfo?.apply {
-            base.errorHandler?.invoke(ErrorInfo(this.first, this.second, path))
-            base.errorHandler = null
-        }
+        base.handleWrite(path, data, UpdateMode.Upsert, multiple)
         return this
     }
 
     /** delete path if exists. Return if delete successfully or not.*/
     fun delete(path: String, multiple: Boolean = false) : JSONBlock {
-        base.write(path, 0, UpdateMode.Delete, multiple)
-        base.errorInfo?.apply {
-            base.errorHandler?.invoke(ErrorInfo(this.first, this.second, path))
-            base.errorHandler = null
-        }
+        base.handleWrite(path, 0, UpdateMode.Delete, multiple)
         return this
     }
 
@@ -369,7 +430,7 @@ open class JSONBlock {
     fun parse() : Any {
         if (base.contentType == "object" || base.contentType == "array") {
             val iterator = PeekIterator(base.jsonData)
-            return base.getStructuredData(iterator, firstCharacter = iterator.nextByte()).value.tree
+            return base.getStructuredData(iterator, iterator.nextByte()).value.tree
         }
         return base.resolveValue(base.jsonText, base.jsonData, base.contentType)
     }

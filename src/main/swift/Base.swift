@@ -4,6 +4,26 @@
 //
 //  Created by Nishain De Silva on 2023-06-11.
 //
+internal struct TypeConstraint {
+    private let requiredType: String?
+    private let canStringParse: Bool
+    
+    init() {
+        canStringParse = false
+        requiredType = nil
+    }
+    
+    init(_ requiredType: String?, canStringParse: Bool) {
+        self.canStringParse = canStringParse
+        self.requiredType = requiredType
+    }
+    
+    func isTypeMatch(_ type: String) -> Bool {
+        return requiredType == nil
+            || requiredType == type
+            || (canStringParse && type == "string")
+    }
+}
 
 internal class Base: State {
     internal enum UpdateMode {
@@ -18,7 +38,7 @@ internal class Base: State {
         var memoryHolder: [UInt8] = []
         
         var array: [JSONBlock] = []
-        var children: [JSONChild] = []
+        var children = JSONCollection()
         var tree: Any = []
         var isBytes: Bool = false
         
@@ -41,7 +61,7 @@ internal class Base: State {
             array = arrayData
         }
         
-        init(childData: [JSONChild]) {
+        init(childData: JSONCollection) {
             children = childData
         }
         
@@ -49,30 +69,8 @@ internal class Base: State {
             tree = parsedData
         }
     }
-
-    internal class CollectionHolder {
-        var type: String
-        var objectCollection: [String: Any]
-        var arrayCollection: [Any]
-        var reservedObjectKey = ""
-        
-        init(isObject: Bool) {
-            type = isObject ? "object" : "array"
-            objectCollection = [:]
-            arrayCollection = []
-        }
-        
-        func assignChildToObject(_ child: CollectionHolder) {
-            objectCollection[reservedObjectKey] = child.type == "object" ? child.objectCollection : child.arrayCollection
-        }
-        
-        func appendChildToArray(_ child: CollectionHolder) {
-            arrayCollection.append(child.type == "object" ? child.objectCollection : child.arrayCollection)
-        }
-
-    }
     
-    internal static func serializeToBytes(_ node: Any?, _ index: Int, _ tabCount: Int, _ stringDelimiter: UInt8) -> [UInt8]  {
+    internal static func serializeToBytes(_ node: Any?, _ stringDelimiter: UInt8) -> [UInt8]  {
         if let node {
             guard let object = node as? [String: Any?] else {
                 guard let array = node as? [Any?] else {
@@ -80,7 +78,10 @@ internal class Base: State {
                         guard let boolean =  node as? Bool else {
                             guard let intNumber = node as? Int else {
                                 guard let doubleNumber = node as? Double else {
-                                    return [stringDelimiter, 35, 73, 78, 86, 65, 76, 73, 68, 95, 84, 89, 80, 69, stringDelimiter] // "#INVALID_TYPE"
+                                    guard let jsonEntity = node as? JSONBlock else {
+                                        return [stringDelimiter, 35, 73, 78, 86, 65, 76, 73, 68, 95, 84, 89, 80, 69, stringDelimiter] // "#INVALID_TYPE"
+                                    }
+                                    return jsonEntity.base.jsonDataMemoryHolder
                                 }
                                 return Array(String(doubleNumber).utf8)
                             }
@@ -90,36 +91,14 @@ internal class Base: State {
                     }
                     return [stringDelimiter] + Array(string.utf8) + [stringDelimiter]
                 }
-                let innerContent = array.map({serializeToBytes($0, index + 1, tabCount, stringDelimiter)})
-                if tabCount != 0 && innerContent.count != 0 {
-                    let spacer: [UInt8] = Array(repeating: 32, count: (index + 1) * tabCount)
-                    let endSpacer: [UInt8] = Array(repeating: 32, count: index * tabCount)
-                    var data: [UInt8] = [91, 10]
-                    let separator: [UInt8] = [44, 10] + spacer
-                    data.append(contentsOf: spacer)
-                    data.append(contentsOf: innerContent.joined(separator: separator))
-                    data.append(10)
-                    data.append(contentsOf: endSpacer)
-                    data.append(93)
-                    return data
-                }
+                let innerContent = array.map({serializeToBytes($0, stringDelimiter)})
+                
                 return ([91] + innerContent.joined(separator: [44])) + [93]
             }
             let innerContent = object.map({(key, value) in
-                (([stringDelimiter] + Array(key.utf8)) + (tabCount != 0 ? [stringDelimiter, 58, 32] : [stringDelimiter, 58])) + serializeToBytes(value,index + 1 , tabCount, stringDelimiter)
+                (([stringDelimiter] + Array(key.utf8)) + [stringDelimiter, 58]) + serializeToBytes(value, stringDelimiter)
             })
-            if tabCount != 0 && innerContent.count != 0 {
-                let spacer: [UInt8] = Array(repeating: 32, count: (index + 1) * tabCount)
-                let endSpacer: [UInt8] = Array(repeating: 32, count: index * tabCount)
-                var data: [UInt8] = [123, 10]
-                let separator: [UInt8] = [44, 10] + spacer
-                data.append(contentsOf: spacer)
-                data.append(contentsOf: innerContent.joined(separator: separator))
-                data.append(10)
-                data.append(contentsOf: endSpacer)
-                data.append(125)
-                return data
-            }
+            
             return ([123] + (innerContent.joined(separator: [44]))) + [125]
         } else {
             return [110, 117, 108, 108]
@@ -127,7 +106,7 @@ internal class Base: State {
     }
     
     
-    private func replaceData(_ iterator: inout PeekIterator, _ dataToAdd: [UInt8], copiedBytes: inout [UInt8]) {
+    private func replaceData(_ iterator: inout PeekIterator, _ data: [UInt8], copiedBytes: inout [UInt8]) {
         
         let quotation = quotation
         // 0 - object/array, string - 1, others - 3
@@ -152,7 +131,9 @@ internal class Base: State {
                 type = 3
                 break
             }
-            copiedBytes.append(char)
+            if char > 32 {
+                copiedBytes.append(char)
+            }
         }
         
         if type == 1 || type == 2 {
@@ -161,7 +142,7 @@ internal class Base: State {
                 if isInQuotes {
                     if !isEscaping && char == quotation {
                         if type == 2 {
-                            copiedBytes.append(contentsOf: dataToAdd)
+                            copiedBytes.append(contentsOf: data)
                             return
                         }
                         isInQuotes = false
@@ -177,7 +158,7 @@ internal class Base: State {
                     } else if char == 125 || char == 93 {
                         notationBalance -= 1
                         if notationBalance == 0 {
-                            copiedBytes.append(contentsOf: dataToAdd)
+                            copiedBytes.append(contentsOf: data)
                             return
                         }
                     } else if char == quotation {
@@ -190,7 +171,7 @@ internal class Base: State {
             while iterator.hasNext() {
                 let char = iterator.next()
                 if !(isNumber(char) || (char > 96 && char < 123)) {
-                    copiedBytes.append(contentsOf: dataToAdd)
+                    copiedBytes.append(contentsOf: data)
                     iterator.moveBack()
                     return
                 }
@@ -203,19 +184,21 @@ internal class Base: State {
     }
     
     internal func getField <T>(_ path: String?, _ fieldName: String, _ mapper: (ValueStore) -> T?, ignoreType:Bool = false) -> T? {
-        guard let (data, type) = path == nil ? (ValueStore(jsonText, jsonDataMemoryHolder), contentType) : decodeData(path!) else { return nil; }
-        if (!ignoreType && type != fieldName) || (ignoreType && type != fieldName && type != "string") {
-            if errorHandler != nil {
-                errorHandler!(ErrorInfo(
-                    ErrorCode.nonMatchingDataType,
-                    (path?.split(separator: pathSplitter).count ?? 0) - 1,
-                    path ?? ""
-                ))
-                errorHandler = nil
-            }
-            return nil
+        if let path {
+            guard let result = decodeData(path, typeConstraint: TypeConstraint(fieldName, canStringParse: ignoreType))
+            else { return nil }
+            return mapper(result.value)
         }
-        return mapper(data)
+        
+        if TypeConstraint(fieldName, canStringParse: ignoreType)
+            .isTypeMatch(contentType) {
+            return mapper(ValueStore(jsonText, jsonDataMemoryHolder))
+        }
+        if errorHandler != nil {
+            errorHandler!(ErrorInfo(ErrorCode.nonMatchingDataType, -1, ""))
+            errorHandler = nil
+        }
+        return nil
     }
     
     internal func resolveValue(_ stringData: String, _ byteData: [UInt8], _ type: String) -> Any {
@@ -229,62 +212,47 @@ internal class Base: State {
     }
     
     @discardableResult
-    private func addData(_ notationBalance: Int, _ isInObject: Bool, _ dataToAdd: Any?, _ copiedBytes: inout [UInt8], _ tabUnitCount: Int, paths: [[UInt8]], isIntermediateAdd: Bool = false, isFirstValue: Bool = false) -> (ErrorCode, Int)? {
+    private func addData(_ notationBalance: Int, _ isInObject: Bool, _ data: [UInt8], _ copiedBytes: inout [UInt8], paths: [[UInt8]], isIntermediateAdd: Bool = false) -> (ErrorCode, Int)? {
         
         let quotation = quotation
         if !isIntermediateAdd {
             copiedBytes.removeLast()
-            if !isLastCharacterOpenNode(&copiedBytes) {
+            if !(copiedBytes.last == 123 || copiedBytes.last == 91) {
                 copiedBytes.append(44)
             }
         }
-        if tabUnitCount != 0 && !isFirstValue {
-            copiedBytes.append(10)
-            copiedBytes.append(contentsOf: [UInt8] (repeating: 32, count: notationBalance * tabUnitCount))
-        }
+        
         if isInObject {
             copiedBytes.append(quotation)
             copiedBytes.append(contentsOf: paths[paths.count - 1])
-            let endKeyPhrase: [UInt8] = tabUnitCount == 0 ? [quotation, 58] : [quotation, 58, 32]
-            copiedBytes.append(contentsOf: endKeyPhrase)
+            copiedBytes.append(contentsOf: [quotation, 58])
         }
-        
-        var bytesToAdd = Base.serializeToBytes(dataToAdd, notationBalance, tabUnitCount, quotation)
-        
-        if !isIntermediateAdd {
-            if tabUnitCount != 0 {
-                bytesToAdd.append(10)
-                bytesToAdd.append(contentsOf: [UInt8] (repeating: 32, count: (notationBalance - 1) * tabUnitCount))
-            }
-            bytesToAdd.append(isInObject ? 125 : 93)
+
+        copiedBytes.append(contentsOf: data)
+        if isIntermediateAdd {
+            copiedBytes.append(44)
         } else {
-            bytesToAdd.append(44)
-            if tabUnitCount != 0 && isFirstValue {
-                bytesToAdd.append(10)
-                bytesToAdd.append(contentsOf: [UInt8] (repeating: 32, count: notationBalance * tabUnitCount))
-            }
+            copiedBytes.append(isInObject ? 125 : 93)
         }
-        copiedBytes.append(contentsOf: bytesToAdd)
         return nil
     }
     
+    internal func handleWrite(_ path: String, _ data: Any?, _ mode: UpdateMode, _ multiple: Bool) {
+        write(path, Base.serializeToBytes(data, quotation), writeMode: mode, multiple)
+        if errorInfo != nil {
+            errorHandler?(ErrorInfo(errorInfo!.code, errorInfo!.occurredQueryIndex, path))
+            errorHandler = nil
+        }
+    }
+    
     internal func write(_ inputPath: String,
-            _ data:Any?, writeMode: UpdateMode,
+            _ data: [UInt8], writeMode: UpdateMode,
             _ isMultiple: Bool
         ) {
         errorInfo = nil
         if !(contentType == "object" || contentType == "array") {
             errorInfo = (ErrorCode.nonNestableRootType, 0)
             return
-        }
-        
-        var tabUnitCount = 0
-        if jsonData[1] == 10 {
-            while (tabUnitCount + 2) < jsonData.count {
-                if jsonData[tabUnitCount + 2] == 32 {
-                    tabUnitCount += 1
-                } else { break }
-            }
         }
         
         let (paths, lightMatch, arrayIndexes, searchDepths) = splitPath(inputPath)
@@ -339,9 +307,21 @@ internal class Base: State {
         }
         
         func finishWriting() {
+            let quotation = quotation
             while iterator.hasNext() {
                 let char = iterator.next()
-                copiedBytes.append(char)
+                if isInQuotes || char > 32 {
+                    copiedBytes.append(char)
+                }
+                if !escapeCharacter && char == quotation {
+                    isInQuotes = !isInQuotes
+                } else if isInQuotes {
+                    if escapeCharacter {
+                        escapeCharacter = false
+                    } else if char == 92 {
+                        escapeCharacter = true
+                    }
+                }
             }
             
             jsonDataMemoryHolder = copiedBytes
@@ -367,7 +347,9 @@ internal class Base: State {
         
         while iterator.hasNext() {
             let char = iterator.next()
-            copiedBytes.append(char)
+            if isInQuotes || char > 32 {
+                copiedBytes.append(char)
+            }
             // if within quotation ignore processing json literals...
             if !isInQuotes {
                 if char == 123 || char == 91 {
@@ -386,7 +368,7 @@ internal class Base: State {
                         }
                         
                         if (processedPathIndex + 1) == paths.count {
-                            if iterateArrayWriteRecursive(&iterator, elementIndex: parsedIndex!, &copiedBytes, notationBalance, searchDepth == 0, data, writeMode, isMultiple, tabUnitCount) {
+                            if iterateArrayWriteRecursive(&iterator, elementIndex: parsedIndex!, &copiedBytes, notationBalance, searchDepth == 0, data, writeMode, isMultiple) {
                                 if !restoreLastPointIfNeeded(isMultiple) {
                                     finishWriting()
                                     return
@@ -419,7 +401,7 @@ internal class Base: State {
                         } else {
                             // make sure the the last attribute is an object attribute and not an array index
                             if arrayIndexes[arrayIndexes.count - 1] == nil {
-                                addData(notationBalance + 1, true, data, &copiedBytes, tabUnitCount, paths: paths)
+                                addData(notationBalance + 1, true, data, &copiedBytes, paths: paths)
                                 if !restoreLastPointIfNeeded(isMultiple) {
                                     finishWriting()
                                     return
@@ -534,7 +516,7 @@ internal class Base: State {
                         // section responsible to when last attribute is found
                         if(processedPathIndex == paths.count) {
                             if writeMode == .delete {
-                                deleteData(&iterator, &copiedBytes, tabUnitCount, notationBalance)
+                                deleteData(&iterator, &copiedBytes, notationBalance)
                                 if restoreLastPointIfNeeded(isMultiple) { continue } else {
                                     finishWriting()
                                     return
@@ -547,8 +529,7 @@ internal class Base: State {
                                 errorInfo = (ErrorCode.objectKeyAlreadyExists, processedPathIndex - 1)
                                 return
                             } else {
-                                let bytesToAdd = Base.serializeToBytes(data, notationBalance, tabUnitCount, quotation)
-                                replaceData(&iterator, bytesToAdd, copiedBytes: &copiedBytes)
+                                replaceData(&iterator, data, copiedBytes: &copiedBytes)
                                 if writeMode == .upsert {
                                     isObjectAttributeFound = true
                                 }
@@ -575,7 +556,7 @@ internal class Base: State {
         return
     }
 
-    private func deleteData(_ iterator: inout PeekIterator, _ copiedData: inout [UInt8], _ tabUnitCount: Int, _ prevNotationBalance: Int) {
+    private func deleteData(_ iterator: inout PeekIterator, _ copiedData: inout [UInt8], _ prevNotationBalance: Int) {
         var didRemovedFirstComma = false
         var isInQuotes = false
         var notationBalance = prevNotationBalance
@@ -620,12 +601,6 @@ internal class Base: State {
                 } else if char == 125 || char == 93 {
                     notationBalance -= 1
                     if notationBalance == (prevNotationBalance - 1) {
-                        if tabUnitCount != 0 {
-                            if didRemovedFirstComma {
-                                copiedData.append(10)
-                                copiedData.append(contentsOf: [UInt8](repeating: 32, count: (prevNotationBalance - 1) * tabUnitCount))
-                            }
-                        }
                         iterator.moveBack()
                         return
                     }
@@ -644,99 +619,93 @@ internal class Base: State {
             }
         }
     }
-
-    internal func getStructuredData(_ iterator: inout PeekIterator, firstCharacter: UInt8) -> (value: ValueStore, type: String) {
-        var stack: [CollectionHolder] = []
-        var isInQuotes = false
-        var grabbedKey = ""
-        var isGrabbingText = false
-        var grabbedText = ""
-        var notationBalance = 1
-        var shouldProcessObjectValue = false
-        var escapeCharacter = false
-        
-        if firstCharacter == 123 {
-            stack.append(CollectionHolder(isObject: true))
+    
+    private func parseSingularValue(_ input: String) -> Any? {
+        if input.first == "t" {
+            return true
+        } else if input.first == "f" {
+            return false
+        } else if input.first == "n" {
+            return nil
         } else {
-            stack.append(CollectionHolder(isObject: false))
+            return Double(input) ?? "#INVALID_NUMERIC"
         }
-        
-        let quotation = quotation
-        while iterator.hasNext() {
-            let char = iterator.next()
-            if !isInQuotes {
-                if char == 123 || char == 91 {
-                    notationBalance += 1
-                    if stack.last!.type == "object" {
-                        stack.last!.reservedObjectKey = grabbedKey
-                    }
-                    stack.append(CollectionHolder(isObject: char == 123))
-                    shouldProcessObjectValue = false
-                } else if char == 125 || char == 93 {
-                    notationBalance -= 1
-                    if isGrabbingText {
-                        if stack.last!.type == "object" {
-                            stack.last!.objectCollection[grabbedKey] = parseSingularValue(trimSpace(grabbedText))
-                        } else {
-                            stack.last!.arrayCollection.append(parseSingularValue(trimSpace(grabbedText)))
-                        }
-                        isGrabbingText = false
-                    }
-                    if notationBalance == 0 {
-                        return stack.first!.type == "object" ? (ValueStore(parsedData: stack.last!.objectCollection), "object") : (ValueStore(parsedData: stack.last!.arrayCollection), "array")
-                    }
-                    shouldProcessObjectValue = false
-                    let child = stack.removeLast()
-                    if stack.last!.type == "object" {
-                        stack.last!.assignChildToObject(child)
-                    } else {
-                        stack.last!.appendChildToArray(child)
-                    }
-                } else if char == 58 {
-                    shouldProcessObjectValue = true
-                    grabbedKey = grabbedText
-                } else if !isGrabbingText && ((char >= 48 && char <= 57) || char == 45
-                    || char == 116 || char == 102
-                    || char == 110) {
-                    grabbedText = ""
-                    isGrabbingText = true
-                } else if char == 44 && isGrabbingText {
-                    isGrabbingText = false
-                    if stack.last!.type == "object" {
-                        stack.last!.objectCollection[grabbedKey] = parseSingularValue(trimSpace(grabbedText))
-                    } else {
-                        stack.last!.arrayCollection.append(parseSingularValue(trimSpace(grabbedText)))
-                    }
-                    shouldProcessObjectValue = false
-                }
-            }
-            if !escapeCharacter && char == quotation {
-                isInQuotes = !isInQuotes
-                isGrabbingText = isInQuotes
-                if isGrabbingText {
-                    grabbedText = ""
-                } else {
-                    if stack.last!.type == "object" {
-                        if shouldProcessObjectValue {
-                            stack.last!.objectCollection[grabbedKey] = grabbedText
-                        }
-                    } else {
-                        stack.last!.arrayCollection.append(grabbedText)
-                    }
-                    shouldProcessObjectValue = false
-                }
-            } else if isGrabbingText {
-                grabbedText.append(Character(UnicodeScalar(char)))
-            }
-            if escapeCharacter {
-                escapeCharacter = false
-            } else if char == 92 {
-                escapeCharacter = true
-            }
-        }
-        return (ValueStore(parsedData: []), firstCharacter == 123 ? "object" : "array")
     }
     
+    private func parseNextElement(_ iterator: inout PeekIterator, firstCharacter: UInt8, _ quotation: UInt8) -> Any {
+        var isEscaping = false
+        var objectValue: [String: Any?] = [:]
+        var arrayValue: [Any?] = []
+        var grabbedKey = ""
+        var grabbedText = ""
+        let isObject = firstCharacter == 123
+        var isKeyCaptured = false
+        var isInQuotes = false
+        while iterator.hasNext() {
+            let char = iterator.next()
+            if !isEscaping && char == quotation {
+                isInQuotes = !isInQuotes
+                if isInQuotes {
+                    // inside a array no need to worry about keys...
+                    grabbedText = ""
+                } else {
+                    if isObject {
+                        if isKeyCaptured {
+                            objectValue[grabbedKey] = grabbedText
+                            isKeyCaptured = false
+                        } else {
+                            grabbedKey = grabbedText
+                            isKeyCaptured = true
+                        }
+                    } else {
+                        arrayValue.append(grabbedText)
+                    }
+                }
+            } else if isInQuotes {
+                if isEscaping {
+                    isEscaping = false
+                } else if char == 92 {
+                    isEscaping = true
+                }
+                grabbedText.append(Character(UnicodeScalar(char)))
+            } else {
+                if char == 123 || char == 91 {
+                    if isObject {
+                        objectValue[grabbedKey] = parseNextElement(&iterator, firstCharacter: char, quotation)
+                        isKeyCaptured = false
+                    } else {
+                        arrayValue.append(parseNextElement(&iterator, firstCharacter: char, quotation))
+                    }
+                } else if char == 125 || char == 93 {
+                    if isObject { return objectValue }
+                    return arrayValue
+                } else {
+                    guard let value = getPrimitive(&iterator, char)?.value else { continue }
+                    if isObject {
+                        objectValue[grabbedKey] = parseSingularValue(value)
+                        isKeyCaptured = false
+                    } else {
+                        arrayValue.append(parseSingularValue(value))
+                    }
+                }
+            }
+            
+        }
+        return "#INVALID_TYPE"
+    }
+    
+    internal func getStructuredData(_ iterator: inout PeekIterator, firstCharacter: UInt8) -> (value: ValueStore, type: String) {
+        let dataType = firstCharacter == 123 ? "object" : "array"
+        return (
+            ValueStore(parsedData:
+                        parseNextElement(
+                            &iterator,
+                            firstCharacter: firstCharacter,
+                            quotation
+                        )
+                    ), dataType)
+    }
+        
     private func iterateArray(_ iterator: inout PeekIterator, elementIndex: Int) -> Bool {
         var notationBalance = 1
         var escapeCharacter = false
@@ -744,18 +713,8 @@ internal class Base: State {
         var cursorIndex = 0
         
         if elementIndex == 0 {
-            while iterator.hasNext() {
-                let char = iterator.next()
-                if !(char == 10 || char == 32) {
-                    iterator.moveBack()
-                    if char == 93 {
-                        return false
-                    }
-                    return true
-                }
-            }
-            return false
-            
+            guard let nextChar = iterator.peek() else { return false }
+            return nextChar != 93
         }
         
         let quotation = quotation
@@ -797,17 +756,8 @@ internal class Base: State {
         var cursorIndex = 0
         
         if elementIndex == 0 {
-            while iterator.hasNext() {
-                let char = iterator.next()
-                if !(char == 10 || char == 32) {
-                    iterator.moveBack()
-                    if char == 93 {
-                        return false
-                    }
-                    return true
-                }
-            }
-            return false
+            guard let nextChar = iterator.peek() else { return false }
+            return nextChar != 93
         }
         
         let quotation = quotation
@@ -845,7 +795,7 @@ internal class Base: State {
         return false
     }
     
-    private func iterateArrayWriteRecursive(_ iterator: inout PeekIterator, elementIndex: Int, _ copyingData: inout [UInt8], _ initialNotationBalance: Int, _ shouldRecurse: Bool, _ dataToAdd: Any?, _ updateMode: UpdateMode, _ isMultiple: Bool, _ tabUnitCount: Int) -> Bool {
+    private func iterateArrayWriteRecursive(_ iterator: inout PeekIterator, elementIndex: Int, _ copyingData: inout [UInt8], _ initialNotationBalance: Int, _ shouldRecurse: Bool, _ data: [UInt8], _ updateMode: UpdateMode, _ isMultiple: Bool) -> Bool {
         var notationBalance = initialNotationBalance
         let stopBalance = initialNotationBalance - 1
         var escapeCharacter = false
@@ -856,34 +806,26 @@ internal class Base: State {
         let quotation = quotation
         
         if elementIndex == 0 {
-            while iterator.hasNext() {
-                let char = iterator.next()
-                
-                if !(char == 10 || char == 32) {
-                    iterator.moveBack()
-                    if char == 93 {
-                        copyingData.append(char)
-                        if updateMode == .onlyInsert || updateMode == .upsert {
-                            addData(notationBalance, false, dataToAdd, &copyingData, tabUnitCount, paths: [])
-                            copyingData.removeLast()
-                            return true
-                        }
-                        copyingData.removeLast()
-                        return false
-                    }
-                    if updateMode == .delete {
-                        deleteData(&iterator, &copyingData, tabUnitCount, notationBalance)
-                    } else if updateMode == .onlyInsert {
-                        addData(notationBalance, false, dataToAdd, &copyingData, tabUnitCount, paths: [], isIntermediateAdd: true, isFirstValue: true)
-                    } else {
-                        let replacingData = Base.serializeToBytes(dataToAdd, notationBalance, tabUnitCount, quotation)
-                        replaceData(&iterator, replacingData, copiedBytes: &copyingData)
-                    }
+            guard let char = iterator.peek() else { return false }
+            
+            if char == 93 {
+                copyingData.append(char)
+                if updateMode == .onlyInsert || updateMode == .upsert {
+                    addData(notationBalance, false, data, &copyingData, paths: [])
+                    copyingData.removeLast()
                     return true
                 }
-                copyingData.append(char)
+                copyingData.removeLast()
+                return false
             }
-            return false
+            if updateMode == .delete {
+                deleteData(&iterator, &copyingData, notationBalance)
+            } else if updateMode == .onlyInsert {
+                addData(notationBalance, false, data, &copyingData, paths: [], isIntermediateAdd: true)
+            } else {
+                replaceData(&iterator, data, copiedBytes: &copyingData)
+            }
+            return true
         }
         
         while iterator.hasNext() {
@@ -896,7 +838,7 @@ internal class Base: State {
                 if char == 123 || char == 91 {
                     notationBalance += 1
                     if char == 91 && shouldRecurse {
-                        didProcessed = iterateArrayWriteRecursive(&iterator, elementIndex: elementIndex, &copyingData, notationBalance, true, dataToAdd, updateMode, isMultiple, tabUnitCount)
+                        didProcessed = iterateArrayWriteRecursive(&iterator, elementIndex: elementIndex, &copyingData, notationBalance, true, data, updateMode, isMultiple)
                         if !isMultiple && didProcessed {
                             return true
                         }
@@ -906,7 +848,7 @@ internal class Base: State {
                     if notationBalance == stopBalance {
                         iterator.moveBack()
                         if updateMode == .onlyInsert || updateMode == .upsert {
-                            addData(notationBalance + 1, false, dataToAdd, &copyingData, tabUnitCount, paths: [])
+                            addData(notationBalance + 1, false, data, &copyingData, paths: [])
                             copyingData.removeLast()
                             return true
                         }
@@ -917,11 +859,11 @@ internal class Base: State {
                     cursorIndex += 1
                     if cursorIndex == elementIndex {
                         if updateMode == .delete {
-                            deleteData(&iterator, &copyingData, tabUnitCount, notationBalance)
+                            deleteData(&iterator, &copyingData, notationBalance)
                         } else if updateMode == .onlyInsert {
-                            addData(notationBalance, false, dataToAdd, &copyingData, tabUnitCount, paths: [], isIntermediateAdd: true)
+                            addData(notationBalance, false, data, &copyingData, paths: [], isIntermediateAdd: true)
                         } else {
-                            let replacingData = Base.serializeToBytes(dataToAdd, notationBalance, tabUnitCount, quotation)
+                            let replacingData = Base.serializeToBytes(data, quotation)
                             replaceData(&iterator, replacingData, copiedBytes: &copyingData)
                         }
                         return true
@@ -936,6 +878,47 @@ internal class Base: State {
             }
         }
         return false
+    }
+    
+    internal func getKeys() -> [String]? {
+        if contentType != "object" {
+            errorHandler?(ErrorInfo(ErrorCode.cannotFindObjectKeys, -1, ""))
+            errorHandler = nil
+            return nil
+        }
+        
+        var isInQuotes = false
+        var isEscaped = false
+        var grabbedBytes: [UInt8] = []
+        var notationBalance = 0
+        var keys: [String] = []
+        
+        for char in jsonData {
+            if !isEscaped && char == quotation {
+                isInQuotes = !isInQuotes
+                if isInQuotes && notationBalance == 1 {
+                    grabbedBytes = []
+                }
+            } else if isInQuotes  {
+                if isEscaped {
+                    isEscaped = false
+                } else if char == 92 {
+                    isEscaped = true
+                }
+                if notationBalance == 1 {
+                    grabbedBytes.append(char)
+                }
+            } else if char == 123 || char == 91 {
+                notationBalance += 1
+            } else if char == 125 || char == 93 {
+                notationBalance -= 1
+            } else if char == 58 && notationBalance == 1 {
+                keys.append(String(
+                    grabbedBytes.map({ Character(UnicodeScalar($0)) })
+                ))
+            }
+        }
+        return keys
     }
 
     private func getNextElement(_ iterator: inout PeekIterator, _ quotation: UInt8, _ isCopyCollection: Bool) -> (value: ValueStore, type: String) {
@@ -962,9 +945,9 @@ internal class Base: State {
                     return getStructuredData(&iterator, firstCharacter: char)
                 } else if isCopyCollection {
                     if char == 123 {
-                        return (ValueStore(childData: getObjectEntries(&iterator)), "CODE_COLLECTION")
+                        return (ValueStore(childData: JSONCollection(getObjectEntries(&iterator), isArray: false)), "CODE_COLLECTION")
                     } else {
-                        return (ValueStore(childData: getArrayValues(&iterator)), "CODE_COLLECTION")
+                        return (ValueStore(childData: JSONCollection(getArrayValues(&iterator), isArray: true)), "CODE_COLLECTION")
                     }
                 }
                 data = [char]
@@ -980,7 +963,7 @@ internal class Base: State {
         return (ValueStore("no data to retrieve"), "string")
     }
     
-    private func iterateArrayRecursive(_ iterator: inout PeekIterator, elementIndex: Int, _ initialNotationBalance: Int, _ values: inout [JSONBlock], _ shouldRecurse: Bool, _ mode: Int, _ typeConstraint: String?) -> (ValueStore, String)? {
+    private func iterateArrayRecursive(_ iterator: inout PeekIterator, elementIndex: Int, _ initialNotationBalance: Int, _ values: inout [JSONBlock], _ shouldRecurse: Bool, _ mode: Int, _ typeConstraint: TypeConstraint) -> (ValueStore, String)? {
         var notationBalance = initialNotationBalance
         let stopBalance = initialNotationBalance - 1
         var escapeCharacter = false
@@ -990,32 +973,28 @@ internal class Base: State {
         
         let quotation = quotation
         if elementIndex == 0 {
-            while iterator.hasNext() {
-                let char = iterator.next()
-                
-                if !(char == 10 || char == 32) {
-                    iterator.moveBack()
-                    if char == 93 {
-                        return nil
-                    }
-                    /*
-                        mode 0 - singular value
-                        mode 1 - collection data
-                        mode 2 - multiple data
-                     */
-                    let result = getNextElement(&iterator, quotation, mode == 1)
-                    if mode < 2 { return result }
-                    if typeConstraint == nil || typeConstraint == result.type {
-                        if result.value.isBytes {
-                            values.append(JSONBlock(result.value.memoryHolder, result.type, self))
-                        } else {
-                            values.append(JSONBlock(result.value.string, result.type))
-                        }
-                        return nil
-                    }
-                }
+            guard let char = iterator.peek() else { return nil }
+            if char == 93 {
+                return nil
             }
-            return nil
+            /*
+                mode 0 - singular value
+                mode 1 - collection data
+                mode 2 - multiple data
+             */
+            let result = getNextElement(&iterator, quotation, mode == 1)
+            if mode < 2 {
+                if typeConstraint.isTypeMatch(result.type) { return result }
+                return nil
+            }
+            if typeConstraint.isTypeMatch(result.type) {
+                if result.value.isBytes {
+                    values.append(JSONBlock(result.value.memoryHolder, result.type, self))
+                } else {
+                    values.append(JSONBlock(result.value.string, result.type))
+                }
+                return nil
+            }
         }
         
         while iterator.hasNext() {
@@ -1027,7 +1006,7 @@ internal class Base: State {
                 if char == 123 || char == 91 {
                     notationBalance += 1
                     if char == 91 && shouldRecurse {
-                        innerItem = iterateArrayRecursive(&iterator, elementIndex: elementIndex, initialNotationBalance, &values, true, mode, typeConstraint)
+                        innerItem = iterateArrayRecursive(&iterator, elementIndex: elementIndex, notationBalance, &values, true, mode, typeConstraint)
                         // if innerItem is nil then it means this is a multiple data read
                         if let innerItem {
                             return innerItem
@@ -1043,8 +1022,11 @@ internal class Base: State {
                     cursorIndex += 1
                     if cursorIndex == elementIndex {
                         let result = getNextElement(&iterator, quotation, mode == 1)
-                        if mode < 2 { return result }
-                        if typeConstraint == nil || typeConstraint == result.type {
+                        if mode < 2 {
+                            if typeConstraint.isTypeMatch(result.type) { return result }
+                            return nil
+                        }
+                        if typeConstraint.isTypeMatch(result.type) {
                             if result.value.isBytes {
                                 values.append(JSONBlock(result.value.memoryHolder, result.type, self))
                             } else {
@@ -1239,7 +1221,7 @@ internal class Base: State {
     }
     
     private func exploreData(_ inputPath: String,
-     _ copyCollectionData: Bool, _ grabAllPaths: Bool, _ multiCollectionTypeConstraint: String?
+     _ copyCollectionData: Bool, _ grabAllPaths: Bool, _ typeConstraint: TypeConstraint
         ) -> (value: ValueStore, type: String)? {
         errorInfo = nil
         if !(contentType == "object" || contentType == "array") {
@@ -1345,15 +1327,18 @@ internal class Base: State {
                         }
                         
                         if processedPathIndex == (paths.count - 1) {
-
                             var values: [JSONBlock] = []
-                            let result = iterateArrayRecursive(&iterator, elementIndex: parsedIndex!, notationBalance, &values, searchDepth == 0, extractMode, multiCollectionTypeConstraint)
-                            if result != nil {
-                                return result.unsafelyUnwrapped
+                            let result = iterateArrayRecursive(&iterator, elementIndex: parsedIndex!, notationBalance, &values, searchDepth == 0, extractMode, typeConstraint)
+                            if extractMode < 2 {
+                                if result == nil {
+                                    if restoreLastPointIfNeeded() { continue }
+                                    errorInfo = (ErrorCode.arrayIndexNotFound, processedPathIndex)
+                                    return nil
+                                }
+                                return result
                             }
-                            let isRestored = restoreLastPointIfNeeded()
                             if !values.isEmpty {
-                                if !isRestored {
+                                if !restoreLastPointIfNeeded() {
                                     return singleItemList(values[0])
                                 }
                                 commonPathCollections.append(contentsOf: values)
@@ -1402,6 +1387,13 @@ internal class Base: State {
                     }
                     
                     continue
+                }
+            } else {
+                // handling escape characters at the end ...
+                if escapeCharacter {
+                    escapeCharacter = false
+                } else if char == 92 {
+                    escapeCharacter = true
                 }
             }
             
@@ -1477,18 +1469,24 @@ internal class Base: State {
                         }
                         startSearchValue = true
                         if processedPathIndex == paths.count {
-                            if !grabAllPaths {
-                                return getNextElement(&iterator, quotation, false)
-                            }
-                            
-                            let (value, type) = getNextElement(&iterator, quotation, copyCollectionData)
-                            let elementToAdd: JSONBlock
+                            let capturedElement = getNextElement(&iterator, quotation, copyCollectionData)
                             let isRestored = restoreLastPointIfNeeded()
-                            if !(multiCollectionTypeConstraint == nil || multiCollectionTypeConstraint == type) { continue }
-                            if value.isBytes {
-                                elementToAdd = JSONBlock(value.memoryHolder, type, self)
+                            
+                            if !grabAllPaths {
+                                if typeConstraint.isTypeMatch(capturedElement.type) {
+                                    return capturedElement
+                                }
+                                if isRestored { continue }
+                                errorInfo = (ErrorCode.objectKeyNotFound, processedPathIndex - 1)
+                                return nil
+                            }
+                            if !typeConstraint.isTypeMatch(capturedElement.type) { continue }
+                            
+                            let elementToAdd: JSONBlock
+                            if capturedElement.value.isBytes {
+                                elementToAdd = JSONBlock(capturedElement.value.memoryHolder, capturedElement.type, self)
                             } else {
-                                elementToAdd = JSONBlock(value.string, type)
+                                elementToAdd = JSONBlock(capturedElement.value.string, capturedElement.type)
                             }
                             if !isRestored {
                                 return singleItemList(elementToAdd)
@@ -1499,12 +1497,6 @@ internal class Base: State {
                         }
                     }
                 }
-            }
-            // handling escape characters at the end ...
-            if escapeCharacter {
-                escapeCharacter = false
-            } else if char == 92 {
-                escapeCharacter = true
             }
         }
         errorInfo = (ErrorCode.other, processedPathIndex)
@@ -1526,10 +1518,6 @@ internal class Base: State {
         var notationBalance = 0
         var isEscaping = false
         var isQuotes = false
-        if originalContent[1] == 10 { // already being pretty...
-            return String(originalContent.map({Character(UnicodeScalar($0))}))
-        }
-        
         let quotation = quotation
         
         while iterator.hasNext() {
@@ -1537,7 +1525,9 @@ internal class Base: State {
             if !isEscaping && char == quotation {
                 isQuotes = !isQuotes
             } else if !isQuotes {
-                if char == 123 || char == 91 {
+                if char <= 32 {
+                    continue
+                } else if char == 123 || char == 91 {
                     if iterator.hasNext() {
                         let nextChar = iterator.next()
                         if nextChar == 125 || nextChar == 93 {
@@ -1575,11 +1565,12 @@ internal class Base: State {
             }
             presentation.append(char)
         }
-        return String(presentation.map({Character(UnicodeScalar($0))}))
+        
+        return asString(presentation)
     }
     
-    internal func decodeData(_ inputPath:String, copyCollectionData: Bool = false, grabAllPaths: Bool = false, multiCollectionTypeConstraint: String? = nil) -> (value: ValueStore, type: String)? {
-        let results = exploreData(inputPath, copyCollectionData, grabAllPaths, multiCollectionTypeConstraint)
+    internal func decodeData(_ inputPath:String, copyCollectionData: Bool = false, grabAllPaths: Bool = false, typeConstraint: TypeConstraint = TypeConstraint()) -> (value: ValueStore, type: String)? {
+        let results = exploreData(inputPath, copyCollectionData, grabAllPaths, typeConstraint)
         if let errorInfo {
             errorHandler?(ErrorInfo(errorInfo.code, errorInfo.occurredQueryIndex, inputPath))
             errorHandler = nil
@@ -1587,16 +1578,6 @@ internal class Base: State {
         return results
     }
     
-    private func isLastCharacterOpenNode(_ data: inout [UInt8]) -> Bool {
-        while true {
-            if data.last == 10 || data.last == 32 {
-                data.removeLast()
-            } else {
-                return data.last == 123 || data.last == 91
-            }
-        }
-    }
-
     private func getIntermediateSymbolDepthLimit(_ word: [UInt8]) -> Int? {
         var matchIndex = 0
         var stage = 0
@@ -1715,17 +1696,5 @@ internal class Base: State {
             output.removeLast()
         }
         return output
-    }
-    
-    private func parseSingularValue(_ input: String) -> Any {
-        if input.first == "t" {
-            return true
-        } else if input.first == "f" {
-            return false
-        } else if input.first == "n" {
-            return Constants.NULL
-        } else {
-            return Double(input) ?? "#INVALID_NUMERIC"
-        }
     }
 }

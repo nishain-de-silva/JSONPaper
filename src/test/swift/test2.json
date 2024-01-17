@@ -6,16 +6,12 @@
             "meta": [
                [
                   [
-                     -456,
-                     123,
-                     [
-                        "one",
-                        "two"
-                     ]456
-                  ],
+                     -456,123,
+                     ["one",
+                        "two"]],
                   {
                      "alto": [
-                        -89.34,
+                           -89.34  ,
                         "something",
                         "hello"
                      ]
@@ -41,7 +37,7 @@
             "temperature": 56,
             "moredetails": {
                "ahago": "{he\"llo}",
-               "{temperature}": "someworld",
+               "{temperature}": "someworld hello world",
                "day\"": 52,
                "someList": [
                   47
